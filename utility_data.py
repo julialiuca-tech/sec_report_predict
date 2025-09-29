@@ -232,8 +232,8 @@ def get_cik_ticker_mapping():
             cik_to_ticker[cik] = ticker
             ticker_to_cik[ticker] = cik
             
-        print(f"✅ Loaded {len(cik_to_ticker)} CIK->ticker mappings from SEC")
-        print(f"✅ Loaded {len(ticker_to_cik)} ticker->CIK mappings from SEC")
+        # print(f"✅ Loaded {len(cik_to_ticker)} CIK->ticker mappings from SEC")
+        # print(f"✅ Loaded {len(ticker_to_cik)} ticker->CIK mappings from SEC")
         return cik_to_ticker, ticker_to_cik
         
     except Exception as e:

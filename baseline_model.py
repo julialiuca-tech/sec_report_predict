@@ -20,26 +20,28 @@ import pandas as pd
 
 # Import utility functions
 from utility_binary_classifier import split_train_val_by_column, baseline_binary_classifier
-from utility_data import load_company_tickers_exchange_mappings
-from config import COMPLETENESS_THRESHOLD, Y_LABEL, SPLIT_STRATEGY, SAVE_DIR, STOCK_DIR
+from utility_data import price_trend
+from config import COMPLETENESS_THRESHOLD, Y_LABEL, SPLIT_STRATEGY
+from config import TREND_HORIZON_IN_MONTHS, INVEST_EXP_START_MONTH_STR, INVEST_EXP_END_MONTH_STR
+from config import FEATURIZED_ALL_QUARTERS_FILE, STOCK_TREND_DATA_FILE, MONTH_END_PRICE_FILE
 import xgboost as xgb
-import os
 
-featurized_data_file = os.path.join(SAVE_DIR, 'featurized_all_quarters.csv')
 
-trend_horizon_in_months = 1
-stock_trend_data_file = os.path.join(STOCK_DIR, f'price_trends_{trend_horizon_in_months}month.csv')
-   
 
-def prepare_data_for_model(split_strategy=SPLIT_STRATEGY):
+
+TEST_CUTOFF_DATE = 20241231
+
+def prep_data_feature_label(featurized_data_file=FEATURIZED_ALL_QUARTERS_FILE, 
+                           stock_trend_data_file=STOCK_TREND_DATA_FILE):
     """
-    Load and join featurized data with stock trends, then split into train/val sets.
+    Load and join featurized data with stock trends.
     
     Args:
-        split_strategy (dict): Dictionary with one key-value pair for splitting strategy
+        featurized_data_file (str): Path to featurized data file
+        stock_trend_data_file (str): Path to stock trend data file
     
     Returns:
-        tuple: (X_train, X_val, y_train, y_val, feature_cols)
+        pd.DataFrame: Joined dataset with features and labels
     """
     
     # Load simplified featurized data 
@@ -60,34 +62,43 @@ def prepare_data_for_model(split_strategy=SPLIT_STRATEGY):
     df = df_features.merge(df_trends, on=['cik', 'year_month'], how='inner')
     print(f"Joined data: {df.shape}")
 
+    return df
+
+
+def split_data_for_train_val(df_work, train_val_split_prop=0.7, train_val_split_strategy=SPLIT_STRATEGY):
+    """
+    Split data into train/val sets.
+    
+    Args:
+        df_work (pd.DataFrame): Work dataset to split (already filtered for train/val)
+        train_val_split_prop (float): Proportion of work data to use for training (0.0 to 1.0)
+        train_val_split_strategy (dict): Dictionary with one key-value pair for splitting strategy
+                                       (e.g., {'cik': 'random'}, {'period': 'top'})
+    
+    Returns:
+        tuple: (df_train, df_val) - Training, validation DataFrames
+               - df_train: Training data (from work set)
+               - df_val: Validation data (from work set) 
+    """
+    
+
     # # Perform correlation analysis
     # print(f"\n" + "="*60)
     # print("Feature Correlation Analysis...")
-    # correlations = correlation_analysis(df, Y_LABEL)
+    # correlations = correlation_analysis(df_work, Y_LABEL)
 
     # Use the split_strategy parameter - expect a dictionary with one key
     try:    
-        by_column = list(split_strategy.keys())[0]
-        split_for_training = split_strategy[by_column]
+        by_column = list(train_val_split_strategy.keys())[0]
+        split_for_training = train_val_split_strategy[by_column]
         print(f"Splitting data by {by_column} using {split_for_training} strategy")
-        train_mask, val_mask = split_train_val_by_column(df, 0.7, by_column, split_for_training)
+        df_train, df_val = split_train_val_by_column(df_work, train_val_split_prop, by_column, split_for_training)
     except Exception as e:
         print(f"❌ Error with split_strategy: {str(e)}")
         print("🔄 Falling back to random splitting...")
-        train_mask, val_mask = split_train_val_by_column(df, 0.7, None, 'random')
+        df_train, df_val = split_train_val_by_column(df_work, train_val_split_prop, None, 'random')
 
-    # Prepare features and target
-    feature_cols = [f for f in df.columns if '_current' in f or '_change' in f]
-    X = df[feature_cols].copy()
-    y = df[Y_LABEL].copy()
-    
-    # Apply masks to get training and validation sets
-    X_train = X[train_mask]
-    X_val = X[val_mask]
-    y_train = y[train_mask]
-    y_val = y[val_mask]
-    
-    return X_train, X_val, y_train, y_val, feature_cols 
+    return df_train, df_val
 
 
 def select_feature_cols(df, strategy='all'):
@@ -235,121 +246,195 @@ def build_baseline_model(X_train, X_val, y_train, y_val, feature_cols):
     return results
 
 
-def evaluate_invest():
-    # Prepare data (you can change split_strategy to 'date' for time-based splitting) 
-    # Load simplified featurized data 
-    df_features = pd.read_csv(featurized_data_file)
-    print(f"Features loaded: {df_features.shape}")
+
+
+def top_candidate_w_return(model, df_companies, feature_cols, K=10):
+    """
+    Compute the performance of the model on the top K companies.
     
-    # Load ground truth -- stock price trends
-    df_trends = pd.read_csv(stock_trend_data_file)
-    print(f"Trends loaded: {df_trends.shape}")
+    Args:
+        model: The trained model
+        df_companies: The dataframe containing the companies
+        feature_cols: The columns to use as features
+        K (int): Number of top candidates to select (default: 10)
+        
+    Returns:
+        tuple: (top_k_cumulative_return, market_avg_return, top_k_tickers)
+            - top_k_cumulative_return: Cumulative average return from top K candidates
+            - market_avg_return: Average return of the market (all companies)
+            - top_k_tickers: List of top K candidates' tickers
+    """
+    X_companies = df_companies[feature_cols].copy()
+    y_companies = df_companies[Y_LABEL].copy() 
 
-    # Join features and trends on cik and year_month resolution
-    # Convert period and month_end_date to year_month for proper joining
-    # Period is in YYYYMMDD format, so parse it correctly
-    df_features['year_month'] = pd.to_datetime(df_features['period'], format='%Y%m%d').dt.to_period('M')
-    # Handle timezone-aware dates by converting to naive datetime first
-    df_trends['year_month'] = pd.to_datetime(df_trends['month_end_date']).dt.tz_localize(None).dt.to_period('M')
-    # Inner join on cik and year_month
-    df = df_features.merge(df_trends, on=['cik', 'year_month'], how='inner')
-    print(f"Joined data: {df.shape}")
+    y_pred = model.predict(X_companies)
+    y_pred_proba = model.predict_proba(X_companies)[:, 1]
 
-    # Define split strategy for this analysis
-    split_strategy = {'cik': 'random'}  # Use random splitting by CIK
-    
-    # Use the split_strategy parameter - expect a dictionary with one key
-    try:    
-        by_column = list(split_strategy.keys())[0]
-        split_for_training = split_strategy[by_column]
-        print(f"Splitting data by {by_column} using {split_for_training} strategy")
-        train_mask, val_mask = split_train_val_by_column(df, 0.7, by_column, split_for_training)
-    except Exception as e:
-        print(f"❌ Error with split_strategy: {str(e)}")
-        print("🔄 Falling back to random splitting...")
-        train_mask, val_mask = split_train_val_by_column(df, 0.7, None, 'random')
-
-    # Prepare features and target
-    feature_cols = [f for f in df.columns if '_current' in f or '_change' in f]
-    X = df[feature_cols].copy()
-    y = df[Y_LABEL].copy()
-    
-    # Apply masks to get training and validation sets
-    X_train = X[train_mask]
-    X_val = X[val_mask]
-    y_train = y[train_mask]
-    y_val = y[val_mask]
-    df_val = df[val_mask][['cik', 'ticker', 'period', 'year_month', 'price_return']]
-    invest_val = df[val_mask]['price_return']
-
-    print('average return: ', invest_val.mean())
-    print('median return: ', invest_val.median())
-
-    model = xgb.XGBClassifier(
-            n_estimators=100, max_depth=6, learning_rate=0.1,
-            random_state=42, n_jobs=-1, eval_metric='logloss'
-        )
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_val)
-    y_pred_proba = model.predict_proba(X_val)[:, 1]
-
-    df_val['y_pred_proba']= y_pred_proba
-    df_val.sort_values(by= 'y_pred_proba', ascending=False, inplace=True)
+    df_companies['y_pred_proba']= y_pred_proba
+    df_companies.sort_values(by= 'y_pred_proba', ascending=False, inplace=True)
 
     # Calculate cumulative average of invest_val as we slide down the sorted dataframe
-    df_val['cumulative_avg_return'] = df_val['price_return'].expanding().mean()
-    df_val['cumulative_count'] = range(1, len(df_val) + 1)
-
-    # Load company name mappings
-    ticker_mapping, exchange_mapping = load_company_tickers_exchange_mappings()
+    df_companies['cumulative_avg_return'] = df_companies['price_return'].expanding().mean()
+    df_companies['cumulative_count'] = range(1, len(df_companies) + 1)
     
-    # Add company names to df_val for better reporting
-    df_val['company_name'] = df_val['ticker'].map(ticker_mapping)
-    df_val['company_name'] = df_val['company_name'].fillna(df_val['ticker'])
+    # Calculate analysis metrics
+    # Get the cumulative return for top K candidates
+    if len(df_companies) >= K:
+        top_k_cumulative_return = df_companies.iloc[K-1]['cumulative_avg_return']
+        top_k_companies = df_companies.iloc[:K]
+    else:
+        top_k_cumulative_return = df_companies['cumulative_avg_return'].iloc[-1]
+        top_k_companies = df_companies
     
-    # Find optimal number of investments (highest cumulative average)
-    optimal_idx = df_val['cumulative_avg_return'].idxmax()
-    optimal_count = df_val.loc[optimal_idx, 'cumulative_count']
-    optimal_return = df_val.loc[optimal_idx, 'cumulative_avg_return']
-    optimal_ticker = df_val.loc[optimal_idx, 'ticker']
-    optimal_company = df_val.loc[optimal_idx, 'company_name']
+    # Get market average return (all companies)
+    market_avg_return = df_companies['price_return'].mean()
     
-    # Get top 10 investments info
-    top_10_return = df_val.iloc[9]['cumulative_avg_return'] if len(df_val) >= 10 else df_val['cumulative_avg_return'].iloc[-1]
-    top_10_tickers = df_val.iloc[:10]['ticker'].tolist()
-    top_10_companies = df_val.iloc[:10]['company_name'].tolist()
+    # Get list of top K tickers
+    top_k_tickers = top_k_companies['ticker'].tolist()
     
-    # Consolidated summary statistics
-    print(f"\n📊 Investment Analysis Summary:")
-    print(f"  📈 Total investments: {len(df_val)}")
-    print(f"  📊 Final cumulative average return: {df_val['cumulative_avg_return'].iloc[-1]:.4f}")
-    print(f"  🎯 Best cumulative average return: {optimal_return:.4f} (achieved at {optimal_count} companies)")
-    # Get all companies up to the optimal count
-    optimal_companies = df_val.iloc[:optimal_count]
-    optimal_tickers = optimal_companies['ticker'].tolist()
-    optimal_company_names = optimal_companies['company_name'].tolist()
-    print(f"     Optimal companies: {', '.join([f'{t}({c})' for t, c in zip(optimal_tickers, optimal_company_names)])}")
-    print(f"  📊 Top 10 companies cumulative return: {top_10_return:.4f}")
-    print(f"     Top 10 companies: {', '.join([f'{t}({c})' for t, c in zip(top_10_tickers, top_10_companies)])}")
+    return top_k_cumulative_return, market_avg_return, top_k_tickers
 
 
-    # Plot the cumulative average curve
-    import matplotlib.pyplot as plt
+def invest_top10_per_month():
+    """
+    Test investment strategy using ML model predictions with time-based train/test splits.
     
-    plt.figure(figsize=(12, 8))
-    plt.plot(df_val['cumulative_count'], df_val['cumulative_avg_return'], 
-             linewidth=2, color='blue', label='Cumulative Average Return')
-    plt.axhline(y=1.0, color='red', linestyle='--', alpha=0.7, label='Break-even (1.0)')
-    plt.xlabel('Number of Investments (Sorted by Prediction Probability)')
-    plt.ylabel('Cumulative Average Return')
-    plt.title('Investment Performance: Cumulative Average Return vs Number of Investments')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
+    Iterates over months from 2024-01 to 2025-04, where each month serves as test data
+    and all previous months serve as training data.
+    
+    Returns:
+        None -- prints performance analysis for each month
+    """ 
+    # Load and join data
+    df = prep_data_feature_label(featurized_data_file=FEATURIZED_ALL_QUARTERS_FILE, 
+                                stock_trend_data_file=STOCK_TREND_DATA_FILE)
+    
+    # Get feature columns from the full dataset
+    feature_cols = [f for f in df.columns if '_current' in f or '_change' in f]
+    
+    # Define the range of months to test
+    import pandas as pd
+    start_month = pd.Period(INVEST_EXP_START_MONTH_STR, freq='M')
+    end_month = pd.Period(INVEST_EXP_END_MONTH_STR, freq='M')
+    
+    # Generate list of months to iterate over
+    current_month = start_month
+    months_to_test = []
+    while current_month <= end_month:
+        months_to_test.append(current_month)
+        current_month += 1
+    
+    print(f"\n📊 Testing investment strategy with time-based splits...")
+    print(f"📅 Testing months: {len(months_to_test)} months from {start_month} to {end_month}")
+    
+    # save the records 
+    result_returns = [] 
+    df_invest_record = pd.DataFrame(columns=['year_month', 'rank', 'ticker'])  
+    # Iterate over each month
+    for current_month in months_to_test:
+        print(f"\n" + "="*60)
+        print(f"📅 Testing performance for {current_month}")
+        
+        # Get test data (current month)
+        df_test = df[df['year_month'] == current_month].copy()
+        
+        # Get training data (all months before current month)
+        df_train = df[df['year_month'] < current_month].copy()
+        
+        print(f"📊 Training data: {len(df_train)} samples")
+        print(f"📊 Test data: {len(df_test)} samples")
+        
+        # Skip if no test data for this month
+        if len(df_test) == 0:
+            print(f"⚠️  No test data available for {current_month}, skipping...")
+            continue
+            
+        # Skip if insufficient training data
+        if len(df_train) < 100:  # Minimum threshold for training
+            print(f"⚠️  Insufficient training data ({len(df_train)} samples) for {current_month}, skipping...")
+            continue
+        
+        # Train model on df_train
+        X_train = df_train[feature_cols].copy()
+        y_train = df_train[Y_LABEL].copy()
+        model = xgb.XGBClassifier(
+                n_estimators=100, max_depth=6, learning_rate=0.1,
+                random_state=42, n_jobs=-1, eval_metric='logloss'
+            )
+        model.fit(X_train, y_train)
+        
+        # Run top_candidate_w_return on df_test
+        top10_return, avg_return, top10_tickers = top_candidate_w_return(model, df_test, feature_cols, K=10)
+        print(f"  📊 Top 10 return: {top10_return:.4f}", f"  📊 Average return: {avg_return:.4f}")
+        print(f"  📊 Top 10 tickers: {top10_tickers}")
+        top10_return_cgt_adjusted = 1+0.8*(top10_return-1) if top10_return > 1 else top10_return
+        result_returns.append([current_month, top10_return, avg_return, top10_return_cgt_adjusted])
+        
+        # Append all top tickers at once using vectorized operation
+        new_rows = pd.DataFrame({
+            'year_month': [current_month] * len(top10_tickers),
+            'rank': range(1, len(top10_tickers) + 1),
+            'ticker': top10_tickers
+        })
+        df_invest_record = pd.concat([df_invest_record, new_rows], ignore_index=True)
 
+    # print out the 
+    result_returns = pd.DataFrame(result_returns, columns=['year_month', 'top10_return', 'avg_return', 'top10_return_cgt_adjusted'])
+    print("avg market return: ", result_returns['avg_return'].mean(),
+          ", ", "top 10 return: ", result_returns['top10_return'].mean(), 
+          ", ", "top10 return cgt adjusted: ", result_returns['top10_return_cgt_adjusted'].mean()) 
+
+    return df_invest_record
+
+
+def long_term_gain_from_invest_record(df_invest_record, num_months_horizon):
+    """
+    Compute the long-term gain from investment records for a specified time horizon.
     
-    return df_val 
+    Args:
+        df_invest_record (pd.DataFrame): DataFrame with columns ['year_month', 'ticker'] 
+                                       containing investment decisions
+        num_months_horizon (int): Number of months to look ahead for return calculation
+    
+    Returns:
+        pd.DataFrame: Result from price_trend() function containing trend analysis
+    """
+    # Read month_end_price from config file
+    df_month_end = pd.read_csv(MONTH_END_PRICE_FILE)
+    
+    # Convert year_month back to Period objects (CSV loads them as strings)
+    df_month_end['year_month'] = pd.to_datetime(df_month_end['year_month']).dt.to_period('M')
+    
+    # Filter for tickers relevant to our input dataframe
+    relevant_tickers = df_invest_record['ticker'].unique()
+    df_work = df_month_end[df_month_end['ticker'].isin(relevant_tickers)].copy()
+    
+    # Run price_trend() on df_work with num_months_horizon as parameter
+    price_trend_df = price_trend(df_work, num_months_horizon)
+    
+    # Generate year_month from month_end_date
+    price_trend_df['year_month'] = pd.to_datetime(price_trend_df['month_end_date']).dt.to_period('M')
+    
+    # Filter to only include records where investment was made
+    # Join on ticker and year_month matches investment dates
+    result_df = price_trend_df.merge(
+        df_invest_record,
+        on=['ticker', 'year_month'],
+        how='inner'
+    )
+    
+    result_df_agg_by_month = result_df.groupby('year_month').agg({'price_return': 'mean'}).reset_index()
+    print(result_df_agg_by_month.sort_values(by='year_month', ascending=True))
+    print('average return: ', result_df_agg_by_month['price_return'].mean())
+    result_df_agg_by_month['price_return_cgt_adjusted'] = result_df_agg_by_month['price_return'].apply(
+        lambda x: 1+0.8*(x-1) if x > 1 else x
+    )
+    print('return cgt adjusted: ', result_df_agg_by_month['price_return_cgt_adjusted'].mean())
+    
+    result_df.sort_values(by=['year_month', 'rank'], ascending=True, inplace=True)
+    result_df.to_csv('result_df.csv', index=False)
+    return result_df
+
 
 def main():
     """
@@ -361,8 +446,23 @@ def main():
     print("🚀 Starting SEC Data Analysis and ML Pipeline")
     print("=" * 60)
     
+    
     # Prepare data (you can change split_strategy to 'date' for time-based splitting)
-    X_train, X_val, y_train, y_val, feature_cols = prepare_data_for_model(split_strategy=SPLIT_STRATEGY)
+    # Load and join data
+    df = prep_data_feature_label(featurized_data_file=FEATURIZED_ALL_QUARTERS_FILE, 
+                                stock_trend_data_file=STOCK_TREND_DATA_FILE)
+    
+    # Split data into train/val sets
+    df_train, df_val = split_data_for_train_val(df, 
+                                                train_val_split_prop=0.7,    
+                                                train_val_split_strategy=SPLIT_STRATEGY)
+    
+    # Prepare features and target
+    feature_cols = [f for f in df_train.columns if '_current' in f or '_change' in f]
+    X_train = df_train[feature_cols].copy()
+    X_val = df_val[feature_cols].copy()
+    y_train = df_train[Y_LABEL].copy()
+    y_val = df_val[Y_LABEL].copy()
  
     # Build and compare models
     print(f"\n" + "="*60)
@@ -376,6 +476,8 @@ if __name__ == "__main__":
     results = main()
 
     print("="*60)
-    print("Evaluating Investment Performance...")
+    print("Testing Investment Performance...")
     print("="*60)
-    evaluate_invest()
+    df_invest_record = invest_top10_per_month()
+    df_long_term_gain = long_term_gain_from_invest_record(df_invest_record, num_months_horizon=12)
+    print(df_long_term_gain)

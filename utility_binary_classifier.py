@@ -32,7 +32,7 @@ def _random_split(df, train_prop, prefix="", random_seed=None):
         random_seed (int, optional): Random seed for reproducibility. If None, uses truly random results.
         
     Returns:
-        tuple: (train_mask, val_mask) - Boolean masks for training and validation sets
+        tuple: (df_train, df_val) - Training and validation DataFrames
     """
     print(f"\n🔄 {prefix}Splitting data randomly ({train_prop*100:.1f}% training, {(1-train_prop)*100:.1f}% validation)...")
     
@@ -53,7 +53,10 @@ def _random_split(df, train_prop, prefix="", random_seed=None):
     print(f"📊 {prefix}Training: {train_mask.sum()} samples ({train_mask.sum()/total_samples*100:.1f}%)")
     print(f"📊 {prefix}Validation: {val_mask.sum()} samples ({val_mask.sum()/total_samples*100:.1f}%)")
     
-    return train_mask, val_mask
+    # Return DataFrames instead of masks
+    df_train = df[train_mask].copy()
+    df_val = df[val_mask].copy()
+    return df_train, df_val
 
 
 def split_train_val_by_column(df, train_prop, by_column, split_for_training='random', random_seed=None):
@@ -68,7 +71,7 @@ def split_train_val_by_column(df, train_prop, by_column, split_for_training='ran
         random_seed (int, optional): Random seed for reproducibility. If None, uses truly random results.
         
     Returns:
-        tuple: (train_mask, val_mask) - Boolean masks for training and validation sets
+        tuple: (df_train, df_val) - Training and validation DataFrames
     """
     # Validate split_for_training parameter
     if split_for_training not in ['random', 'top', 'bottom']:
@@ -129,8 +132,11 @@ def split_train_val_by_column(df, train_prop, by_column, split_for_training='ran
 
         print(f"📊 Training: {train_mask.sum()} samples from {len(train_values)} {by_column} values ({train_mask.sum()/total_samples*100:.1f}%)")
         print(f"📊 Validation: {val_mask.sum()} samples from {len(value_counts) - len(train_values)} {by_column} values ({val_mask.sum()/total_samples*100:.1f}%)")
-                
-        return train_mask, val_mask
+        
+        # Return DataFrames instead of masks
+        df_train = df[train_mask].copy()
+        df_val = df[val_mask].copy()
+        return df_train, df_val
         
     except Exception as e:
         print(f"❌ Error during column-based splitting: {str(e)}")

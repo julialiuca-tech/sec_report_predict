@@ -32,15 +32,15 @@ STOCK_DIR = '/Users/juanliu/Workspace/git_test/stock_Stooq_daily_US/derived_data
 # =============================================================================
 
 # Featurized data files
-FEATURIZED_ALL_QUARTERS_FILE = 'featurized_all_quarters.csv'
-FEATURE_COMPLETENESS_RANKING_FILE = 'feature_completeness_ranking.csv'
-FEATURIZED_SIMPLIFIED_FILE = 'featurized_simplified.csv'
+FEATURIZED_ALL_QUARTERS_FILE = os.path.join(SAVE_DIR, 'featurized_all_quarters.csv')
+FEATURE_COMPLETENESS_RANKING_FILE = os.path.join(SAVE_DIR, 'feature_completeness_ranking.csv')
+FEATURIZED_SIMPLIFIED_FILE = os.path.join(SAVE_DIR, 'featurized_simplified.csv')
 
 # Quarter file naming pattern
-QUARTER_FEATURIZED_PATTERN = '{}_featurized.csv'  # Format: 2022q1_featurized.csv
+QUARTER_FEATURIZED_PATTERN = os.path.join(SAVE_DIR, '{}_featurized.csv')  # Format: 2022q1_featurized.csv
 
 # SEC data files
-COMPANY_TICKERS_EXCHANGE_FILE = 'company_tickers_exchange.json'
+COMPANY_TICKERS_EXCHANGE_FILE = os.path.join(DATA_DIR, 'company_tickers_exchange.json')
 
 # =============================================================================
 # FEATURIZATION PARAMETERS
@@ -53,9 +53,11 @@ DEFAULT_DEBUG_FLAG = True
 DEFAULT_N_QUARTERS_HISTORY_COMP = 0  # 0 means no history comparisons, 4 for past 1 year comparison
 
 
-TREND_HORIZON_IN_MONTHS= 1
+TREND_HORIZON_IN_MONTHS= 3
 STOCK_TREND_DATA_FILE = os.path.join(STOCK_DIR, f'price_trends_{TREND_HORIZON_IN_MONTHS}month.csv')
-   
+MONTH_END_PRICE_FILE = os.path.join(STOCK_DIR, 'month_end_price_stooq.csv')
+
+
 # =============================================================================
 # MACHINE LEARNING PARAMETERS
 # =============================================================================
@@ -65,6 +67,8 @@ COMPLETENESS_THRESHOLD = 0.2
 Y_LABEL = 'trend_up_or_down'  # can be 'trend_up_or_down' or 'trend_5per_up'
 SPLIT_STRATEGY = {'cik':'random'} 
 SPLIT_STRATEGY = None
+INVEST_EXP_START_MONTH_STR = '2020-01'
+INVEST_EXP_END_MONTH_STR = '2025-04'
 
 # =============================================================================
 # VALIDATION AND DEBUGGING
