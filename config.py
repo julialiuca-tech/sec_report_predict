@@ -63,6 +63,7 @@ MONTH_END_PRICE_FILE = os.path.join(STOCK_DIR, 'month_end_price_stooq.csv')
 # =============================================================================
 QUARTER_GRADIENTS = [1, 2, 4]
 TOP_K_FEATURES = 200
+FEATURE_IMPORTANCE_RANKING_FLAG = False  # If True, retrain model with top K features based on importance
 
 # Model training parameters
 COMPLETENESS_THRESHOLD = 0.2

@@ -263,25 +263,25 @@ def build_baseline_model(X_train, X_val, y_train, y_val, feature_cols):
         for i, row in best_model_perf['feature_importance'].head(10).iterrows():
             print(f"  {i:2d}. {row['feature']:<30} {row['importance']:.4f}")
         
-    IF FEATURE_IMPORTANCE_RANKING_FLAG:
-        # Get feature importance ranking (descending order)
-        FEATURE_IMPORTANCE_RANKING_FLAG = True
-        feature_importance_ranking = best_model_perf['feature_importance'].sort_values('importance', ascending=False)
-        top_k_features = feature_importance_ranking.head(TOP_K_FEATURES)['feature'].tolist()
-        # Filter training and validation data to only include top K features
-        X_train_topk = X_train[top_k_features].copy()
-        X_val_topk = X_val[top_k_features].copy()
-        
-        # Determine the best model type from the approach name
-        best_model_type = best_approach.split('_')[-1]  # Extract model type (rf or xgb) 
-        retrained_model_perf = baseline_binary_classifier(X_train_topk, X_val_topk, y_train, y_val, best_model_type)
-        print(f"\n🏆 Retrained Model Performance (Top {TOP_K_FEATURES} features):")
-        print(f"   Model: {best_model_type.upper()}")
-        print(f"   Accuracy: {retrained_model_perf['accuracy']:.4f}")
-        print(f"   Precision: {retrained_model_perf['precision']:.4f}")
-        print(f"   Recall: {retrained_model_perf['recall']:.4f}")
-        print(f"   ROC-AUC: {retrained_model_perf['roc_auc']:.4f}")
-        
+        if FEATURE_IMPORTANCE_RANKING_FLAG:
+            # Get feature importance ranking (descending order)
+            feature_importance_ranking = best_model_perf['feature_importance'].sort_values('importance', ascending=False)
+            top_k_features = feature_importance_ranking.head(TOP_K_FEATURES)['feature'].tolist()
+            # Filter training and validation data to only include top K features
+            X_train_topk = X_train[top_k_features].copy()
+            X_val_topk = X_val[top_k_features].copy()
+            
+            # Determine the best model type from the approach name
+            best_model_type = best_approach.split('_')[-1]  # Extract model type (rf or xgb) 
+            retrained_model_perf = baseline_binary_classifier(X_train_topk, X_val_topk, y_train, y_val, best_model_type)
+            print(f"\n🏆 Retrained Model Performance (Top {TOP_K_FEATURES} features):")
+            print(f"   Model: {best_model_type.upper()}")
+            print(f"   Accuracy: {retrained_model_perf['accuracy']:.4f}")
+            print(f"   Precision: {retrained_model_perf['precision']:.4f}")
+            print(f"   Recall: {retrained_model_perf['recall']:.4f}")
+            print(f"   ROC-AUC: {retrained_model_perf['roc_auc']:.4f}")
+        else:
+            feature_importance_ranking = None
     else:
         feature_importance_ranking = None
 
