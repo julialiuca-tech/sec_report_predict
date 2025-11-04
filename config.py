@@ -61,6 +61,8 @@ MONTH_END_PRICE_FILE = os.path.join(STOCK_DIR, 'month_end_price_stooq.csv')
 # =============================================================================
 # MACHINE LEARNING PARAMETERS
 # =============================================================================
+QUARTER_GRADIENTS = [1, 2, 4]
+TOP_K_FEATURES = 200
 
 # Model training parameters
 COMPLETENESS_THRESHOLD = 0.2

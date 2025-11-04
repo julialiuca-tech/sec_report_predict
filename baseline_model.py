@@ -21,10 +21,12 @@ import pandas as pd
 # Import utility functions
 from utility_binary_classifier import split_train_val_by_column, baseline_binary_classifier
 from utility_data import price_trend
-from config import COMPLETENESS_THRESHOLD, Y_LABEL, SPLIT_STRATEGY
+from config import COMPLETENESS_THRESHOLD, Y_LABEL, SPLIT_STRATEGY, QUARTER_GRADIENTS
+from config import TOP_K_FEATURES, FEATURE_IMPORTANCE_RANKING_FLAG
 from config import TREND_HORIZON_IN_MONTHS, INVEST_EXP_START_MONTH_STR, INVEST_EXP_END_MONTH_STR
 from config import FEATURIZED_ALL_QUARTERS_FILE, STOCK_TREND_DATA_FILE, MONTH_END_PRICE_FILE
 import xgboost as xgb
+from featurize import enhance_tags_w_gradient, summarize_feature_completeness
 
 
 
@@ -32,13 +34,16 @@ import xgboost as xgb
 TEST_CUTOFF_DATE = 20241231
 
 def prep_data_feature_label(featurized_data_file=FEATURIZED_ALL_QUARTERS_FILE, 
-                           stock_trend_data_file=STOCK_TREND_DATA_FILE):
+                             stock_trend_data_file=STOCK_TREND_DATA_FILE, 
+                             quarters_for_gradient_comp=None):
     """
     Load and join featurized data with stock trends.
     
     Args:
         featurized_data_file (str): Path to featurized data file
         stock_trend_data_file (str): Path to stock trend data file
+        quarters_for_gradient_comp (list, optional): List of quarters to compute gradients from. 
+                                                    If None, no gradient features are computed.
     
     Returns:
         pd.DataFrame: Joined dataset with features and labels
@@ -47,6 +52,19 @@ def prep_data_feature_label(featurized_data_file=FEATURIZED_ALL_QUARTERS_FILE,
     # Load simplified featurized data 
     df_features = pd.read_csv(featurized_data_file)
     print(f"Features loaded: {df_features.shape}")
+    
+    # Deduplicate features to ensure clean data from the start
+    initial_count = len(df_features)
+    df_features = df_features.drop_duplicates(subset=['cik', 'period'])
+    final_count = len(df_features)
+    if initial_count != final_count:
+        print(f"🧹 Removed {initial_count - final_count:,} duplicate records (cik, period)")
+        print(f"Features after deduplication: {df_features.shape}")
+
+    if quarters_for_gradient_comp is not None:
+        df_features = enhance_tags_w_gradient(df_features, quarters_for_gradient_comp)
+        print(f"Gradient features loaded: {df_features.shape}")
+        print("columns: ", df_features.columns)
     
     # Load ground truth -- stock price trends
     df_trends = pd.read_csv(stock_trend_data_file)
@@ -169,12 +187,14 @@ def build_baseline_model(X_train, X_val, y_train, y_val, feature_cols):
         feature_cols (list): List of feature column names
         
     Returns:
-        dict: Results dictionary with performance metrics
+        tuple: (model_perf_records, feature_importance_ranking)
+            - model_perf_records: Dictionary with performance metrics for each model configuration
+            - feature_importance_ranking: DataFrame with features ranked by importance (descending order)
     """
     print(f"\n" + "="*60)
     print("Testing Different Missing Value Handling Approaches...")
 
-    results = {}
+    model_perf_records = {}
     feature_selection_strategy_list = ['completeness', 'current', 'change', 'all']
     imputation_strategy_list = [ 'none', 'median']
     model_type_list = ['rf', 'xgb']
@@ -198,11 +218,11 @@ def build_baseline_model(X_train, X_val, y_train, y_val, feature_cols):
              X_train_imputed, X_val_imputed = apply_imputation(X_train_filtered, X_val_filtered, imputation)
              for model_name in model_type_list:
                  try:
-                     result = baseline_binary_classifier(X_train_imputed, X_val_imputed, y_train, y_val, model_name)
-                     results[f"{selection}_{imputation}_{model_name}"] = result
+                     model_perf = baseline_binary_classifier(X_train_imputed, X_val_imputed, y_train, y_val, model_name)
+                     model_perf_records[f"{selection}_{imputation}_{model_name}"] = model_perf
                  except Exception as e:
                      print(f"❌ Error with {selection}_{imputation}_{model_name}: {str(e)}")
-                     results[f"{selection}_{imputation}_{model_name}"] = None
+                     model_perf_records[f"{selection}_{imputation}_{model_name}"] = None
 
     
     # 4. Compare results and recommend best approach
@@ -212,14 +232,14 @@ def build_baseline_model(X_train, X_val, y_train, y_val, feature_cols):
     
     # Create comparison table
     comparison_data = []
-    for approach_name, result in results.items():
-        if result is not None:
+    for approach_name, model_perf in model_perf_records.items():
+        if model_perf is not None:
             comparison_data.append({
                 'Approach': approach_name,
-                'Accuracy': f"{result['accuracy']:.4f}",
-                'Precision': f"{result['precision']:.4f}",
-                'Recall': f"{result['recall']:.4f}",
-                'ROC-AUC': f"{result['roc_auc']:.4f}"
+                'Accuracy': f"{model_perf['accuracy']:.4f}",
+                'Precision': f"{model_perf['precision']:.4f}",
+                'Recall': f"{model_perf['recall']:.4f}",
+                'ROC-AUC': f"{model_perf['roc_auc']:.4f}"
             })
     
     if comparison_data:
@@ -227,23 +247,47 @@ def build_baseline_model(X_train, X_val, y_train, y_val, feature_cols):
         print(comparison_df.to_string(index=False))
         
         # Find best approach by ROC-AUC
-        best_approach = max([k for k, v in results.items() if v is not None], 
-                          key=lambda k: results[k]['roc_auc'])
-        best_result = results[best_approach]
+        best_approach = max([k for k, v in model_perf_records.items() if v is not None], 
+                          key=lambda k: model_perf_records[k]['roc_auc'])
+        best_model_perf = model_perf_records[best_approach]
         
         print(f"\n🏆 Best Approach: {best_approach}")
-        print(f"   Accuracy: {best_result['accuracy']:.4f}")
-        print(f"   Precision: {best_result['precision']:.4f}")
-        print(f"   Recall: {best_result['recall']:.4f}")
-        print(f"   ROC-AUC: {best_result['roc_auc']:.4f}")
+        print(f"   Accuracy: {best_model_perf['accuracy']:.4f}")
+        print(f"   Precision: {best_model_perf['precision']:.4f}")
+        print(f"   Recall: {best_model_perf['recall']:.4f}")
+        print(f"   ROC-AUC: {best_model_perf['roc_auc']:.4f}")
         
         # Show top 10 features
         print(f"\n🔍 Top 10 Most Important Features:")
         print("=" * 50)
-        for i, row in best_result['feature_importance'].head(10).iterrows():
+        for i, row in best_model_perf['feature_importance'].head(10).iterrows():
             print(f"  {i:2d}. {row['feature']:<30} {row['importance']:.4f}")
+        
+    IF FEATURE_IMPORTANCE_RANKING_FLAG:
+        # Get feature importance ranking (descending order)
+        FEATURE_IMPORTANCE_RANKING_FLAG = True
+        feature_importance_ranking = best_model_perf['feature_importance'].sort_values('importance', ascending=False)
+        top_k_features = feature_importance_ranking.head(TOP_K_FEATURES)['feature'].tolist()
+        # Filter training and validation data to only include top K features
+        X_train_topk = X_train[top_k_features].copy()
+        X_val_topk = X_val[top_k_features].copy()
+        
+        # Determine the best model type from the approach name
+        best_model_type = best_approach.split('_')[-1]  # Extract model type (rf or xgb) 
+        retrained_model_perf = baseline_binary_classifier(X_train_topk, X_val_topk, y_train, y_val, best_model_type)
+        print(f"\n🏆 Retrained Model Performance (Top {TOP_K_FEATURES} features):")
+        print(f"   Model: {best_model_type.upper()}")
+        print(f"   Accuracy: {retrained_model_perf['accuracy']:.4f}")
+        print(f"   Precision: {retrained_model_perf['precision']:.4f}")
+        print(f"   Recall: {retrained_model_perf['recall']:.4f}")
+        print(f"   ROC-AUC: {retrained_model_perf['roc_auc']:.4f}")
+        
+    else:
+        feature_importance_ranking = None
+
     
-    return results
+    
+    return model_perf_records, feature_importance_ranking
 
 
 
@@ -295,7 +339,7 @@ def top_candidate_w_return(model, df_companies, feature_cols, K=10):
     return top_k_cumulative_return, market_avg_return, top_k_tickers
 
 
-def invest_top10_per_month():
+def invest_top10_per_month(df):
     """
     Test investment strategy using ML model predictions with time-based train/test splits.
     
@@ -304,11 +348,8 @@ def invest_top10_per_month():
     
     Returns:
         None -- prints performance analysis for each month
-    """ 
-    # Load and join data
-    df = prep_data_feature_label(featurized_data_file=FEATURIZED_ALL_QUARTERS_FILE, 
-                                stock_trend_data_file=STOCK_TREND_DATA_FILE)
-    
+    """  
+
     # Get feature columns from the full dataset
     feature_cols = [f for f in df.columns if '_current' in f or '_change' in f]
     
@@ -380,16 +421,22 @@ def invest_top10_per_month():
 
     # print out the 
     result_returns = pd.DataFrame(result_returns, columns=['year_month', 'top10_return', 'avg_return', 'top10_return_cgt_adjusted'])
-    print("avg market return: ", result_returns['avg_return'].mean(),
-          ", ", "top 10 return: ", result_returns['top10_return'].mean(), 
-          ", ", "top10 return cgt adjusted: ", result_returns['top10_return_cgt_adjusted'].mean()) 
-
+   
+    print(f"\n" + "="*60)
+    print("Aggregated Investment Performance:")
+    print(f"   Avg market return: {result_returns['avg_return'].mean():.4f}")
+    print(f"   Top 10 return: {result_returns['top10_return'].mean():.4f}")
+    print(f"   Top 10 return cgt adjusted: {result_returns['top10_return_cgt_adjusted'].mean():.4f}")
+    print(f"="*60)
+   
     return df_invest_record
 
 
 def long_term_gain_from_invest_record(df_invest_record, num_months_horizon):
     """
-    Compute the long-term gain from investment records for a specified time horizon.
+    Although the model is trained on short-term (1-mo or 3-mo) up/down trends, 
+    the model may be useful for picking stocks with long-term potential.
+    This function computes the long-term gain from investment records for a specified time horizon.
     
     Args:
         df_invest_record (pd.DataFrame): DataFrame with columns ['year_month', 'ticker'] 
@@ -441,7 +488,10 @@ def main():
     Run the complete SEC data analysis and ML pipeline.
     
     Returns:
-        dict: Results dictionary with performance metrics
+        tuple: (model_perf_records, feature_importance_ranking, df_long_term_gain)
+            - model_perf_records: Dictionary with performance metrics for each model configuration
+            - feature_importance_ranking: DataFrame with features ranked by importance (descending order)
+            - df_long_term_gain: DataFrame with long-term investment performance analysis
     """
     print("🚀 Starting SEC Data Analysis and ML Pipeline")
     print("=" * 60)
@@ -449,8 +499,7 @@ def main():
     
     # Prepare data (you can change split_strategy to 'date' for time-based splitting)
     # Load and join data
-    df = prep_data_feature_label(featurized_data_file=FEATURIZED_ALL_QUARTERS_FILE, 
-                                stock_trend_data_file=STOCK_TREND_DATA_FILE)
+    df = prep_data_feature_label(quarters_for_gradient_comp=QUARTER_GRADIENTS)
     
     # Split data into train/val sets
     df_train, df_val = split_data_for_train_val(df, 
@@ -467,17 +516,28 @@ def main():
     # Build and compare models
     print(f"\n" + "="*60)
     print("Building and Comparing ML Models...")
-    results = build_baseline_model(X_train, X_val, y_train, y_val, feature_cols)
+    model_perf_records, feature_importance_ranking = \
+         build_baseline_model(X_train, X_val, y_train, y_val, feature_cols)
+  
+    if FEATURE_IMPORTANCE_RANKING_FLAG:
+        # Get top K features
+        top_k_features = feature_importance_ranking.head(TOP_K_FEATURES)['feature'].tolist()
+        # Keep non-feature columns (cik, period, year_month, ticker, price_return, etc.)
+        non_feature_cols = [col for col in df.columns if '_current' not in col and '_change' not in col]
+        df_filtered = df[non_feature_cols + top_k_features].copy()
+        print(f"📊 Original dataframe shape: {df.shape}", f"📊 Filtered dataframe shape: {df_filtered.shape}")
+        df = df_filtered 
     
-    return results
-
-
-if __name__ == "__main__":
-    results = main()
-
+    # test the investment performance
     print("="*60)
     print("Testing Investment Performance...")
     print("="*60)
-    df_invest_record = invest_top10_per_month()
+    df_invest_record = invest_top10_per_month(df)
     df_long_term_gain = long_term_gain_from_invest_record(df_invest_record, num_months_horizon=12)
     print(df_long_term_gain)
+    
+
+
+if __name__ == "__main__":
+    main()
+

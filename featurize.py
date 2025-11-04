@@ -183,7 +183,7 @@ def segment_group_summary(df_joined, form_type, debug_print=DEFAULT_DEBUG_FLAG):
     else:
         df_summary = pd.DataFrame()
     
-    # Print summary statistics
+    # Print summary statistics 
     if debug_print: 
         print(f"SEGMENT GROUP SUMMARY - {form_type} FORMS")
         print(f"Total segment groups processed: {len(segment_group):,}")
@@ -192,7 +192,7 @@ def segment_group_summary(df_joined, form_type, debug_print=DEFAULT_DEBUG_FLAG):
         print(f"  - Single record: {len(df_summary[df_summary['summary_reason'] == 'single_record']):,}")
         print(f"  - Segments null: {len(df_summary[df_summary['summary_reason'] == 'segments_null']):,}")
         print(f"  - Max value: {len(df_summary[df_summary['summary_reason'] == 'max_value']):,}")
-    
+
     return df_summary
 
 
@@ -781,6 +781,147 @@ def simplify_featurized_data(processed_data_dir=SAVE_DIR, min_completeness=DEFAU
     print(f"💾 Simplified data saved to: {simplified_file}")
     
     return df_simplified
+
+
+def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp):
+    """
+    Enhance featurized data with gradient features by computing relative changes
+    from previous quarters.
+    
+    Args:
+        df_work (pd.DataFrame): Input dataframe with features ending in '_current'
+        quarters_for_gradient_comp (list): List of quarters to compute gradients from (e.g., [1, 2] for 1 and 2 quarters ago)
+    
+    This function:
+    1. Takes the input dataframe df_work
+    2. For each feature ending with "_current", looks up values from specified quarters ago
+    3. Computes relative change percentages and creates new features with "_change_q{N}" suffixes
+    4. Returns enhanced dataframe with gradient features
+    
+    Returns:
+        pd.DataFrame: Enhanced dataframe with gradient features (df_work_w_gradient)
+    """
+    print("🔄 Enhancing features with gradient information...")
+    print("=" * 60)
+    
+    print(f"📊 Input dataframe shape: {df_work.shape}")
+    
+    # Identify features ending with "_current"
+    current_features = [col for col in df_work.columns if col.endswith('_current')]
+    print(f"🔍 Found {len(current_features)} features ending with '_current'")
+    
+    if not current_features:
+        print("⚠️  No features ending with '_current' found. Returning original dataframe.")
+        return df_work
+    
+    # Convert period to datetime for easier manipulation
+    df_work['period'] = pd.to_datetime(df_work['period'], format='%Y%m%d')
+    
+    # Create historical data for each specified quarter
+    historical_data = {}
+    for q in quarters_for_gradient_comp:
+        df_historical = df_work.copy()
+        # Subtract months to go back in time (q quarters = q * 3 months)
+        df_historical['period'] = df_historical['period'] - pd.DateOffset(months=q * 3)
+        # Convert back to original format for joining
+        df_historical['period'] = df_historical['period'].dt.strftime('%Y%m%d').astype(int)
+        historical_data[q] = df_historical
+    
+    # Convert back to original format for joining
+    df_work['period'] = df_work['period'].dt.strftime('%Y%m%d').astype(int)
+    
+    # Create gradient features
+    df_work_w_gradient = df_work.copy()
+    
+    print(f"📈 Computing gradient features for quarters: {quarters_for_gradient_comp}")
+    
+    # Prepare historical data with all current features for each quarter
+    historical_subsets = {}
+    total_duplicates = 0
+    
+    for q in quarters_for_gradient_comp:
+        # Note: Main deduplication is handled upstream, but we need to dedupe historical data
+        # since shifting periods might create new duplicates
+        df_historical_subset = historical_data[q][['cik', 'period'] + current_features].drop_duplicates(subset=['cik', 'period'])
+        
+        # Rename columns to indicate they're from previous quarters
+        q_columns = {feature: f'{feature}_q{q}' for feature in current_features}
+        df_historical_subset = df_historical_subset.rename(columns=q_columns)
+        
+        # Debug: Check for duplicates in historical data
+        original_count = len(historical_data[q][['cik', 'period'] + current_features])
+        deduped_count = len(df_historical_subset)
+        duplicates = original_count - deduped_count
+        total_duplicates += duplicates
+        
+        historical_subsets[q] = df_historical_subset
+    
+    if total_duplicates > 0:
+        print(f"🔍 Removed {total_duplicates} total duplicates from historical data")
+    
+    # Merge all historical data
+    for q in quarters_for_gradient_comp:
+        df_work_w_gradient = df_work_w_gradient.merge(historical_subsets[q], on=['cik', 'period'], how='left')
+    
+    # Verify row count hasn't changed
+    if len(df_work_w_gradient) != len(df_work):
+        print(f"⚠️  Warning: Row count changed from {len(df_work)} to {len(df_work_w_gradient)}")
+    
+    # Compute all gradient features at once using vectorized operations
+    print(f"🔄 Computing gradients for {len(current_features)} features across {len(quarters_for_gradient_comp)} quarters...")
+    
+    # Create all gradient feature names and compute gradients for each quarter
+    all_gradient_features = []
+    all_gradient_dfs = []
+    temp_columns_to_remove = []
+    
+    for q in quarters_for_gradient_comp:
+        # Create gradient feature names for this quarter
+        q_features = [f"{feature.replace('_current', '')}_change_q{q}" for feature in current_features]
+        all_gradient_features.extend(q_features)
+        
+        # Get historical columns for this quarter
+        q_current_cols = [f'{feature}_q{q}' for feature in current_features]
+        temp_columns_to_remove.extend(q_current_cols)
+        
+        # Vectorized computation for gradients
+        with np.errstate(divide='ignore', invalid='ignore'):
+            q_gradients = (df_work_w_gradient[current_features].values - df_work_w_gradient[q_current_cols].values) / df_work_w_gradient[q_current_cols].values
+        q_gradients = np.where(df_work_w_gradient[q_current_cols].values != 0, q_gradients, np.nan)
+        
+        # Create gradient DataFrame for this quarter
+        q_gradient_df = pd.DataFrame(q_gradients, columns=q_features, index=df_work_w_gradient.index)
+        all_gradient_dfs.append(q_gradient_df)
+    
+    # Concatenate all gradient features at once to avoid fragmentation
+    if all_gradient_dfs:
+        df_work_w_gradient = pd.concat([df_work_w_gradient] + all_gradient_dfs, axis=1)
+    
+    # Clean up temporary columns
+    df_work_w_gradient = df_work_w_gradient.drop(columns=temp_columns_to_remove, errors='ignore')
+    
+    print(f"✅ Enhanced dataframe shape: {df_work_w_gradient.shape}")
+    
+    # Verify row count is preserved
+    if len(df_work_w_gradient) == len(df_work):
+        print(f"✅ Row count preserved: {len(df_work_w_gradient)} rows (same as original)")
+    else:
+        print(f"❌ Row count mismatch: {len(df_work_w_gradient)} vs {len(df_work)} (original)")
+        raise ValueError(f"Row count changed from {len(df_work)} to {len(df_work_w_gradient)}")
+    
+    # Count new gradient features
+    gradient_features = [col for col in df_work_w_gradient.columns if any(col.endswith(f'_change_q{q}') for q in quarters_for_gradient_comp)]
+    print(f"📊 Added {len(gradient_features)} gradient features")
+    
+    # Show sample of new features
+    if gradient_features:
+        print("🔍 Sample gradient features:")
+        for feature in gradient_features[:5]:  # Show first 5
+            print(f"  - {feature}")
+        if len(gradient_features) > 5:
+            print(f"  ... and {len(gradient_features) - 5} more")
+    
+    return df_work_w_gradient
 
 
 if __name__ == "__main__": 
