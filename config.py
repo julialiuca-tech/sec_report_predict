@@ -24,8 +24,7 @@ SAVE_DIR = os.path.join(DATA_DIR, 'featurized_2015_to_2025')
 DATA_BASE_DIR = os.path.join(DATA_DIR, 'SEC_raw_2015_to_2025')
 
 # stock data 
-STOCK_DIR = os.path.join(DATA_DIR, 'stock_201501_to_202507_yf')
-STOCK_DIR = '/Users/juanliu/Workspace/git_test/stock_Stooq_daily_US/derived_data'
+STOCK_DIR = os.path.join(DATA_DIR, 'stock_Stooq_daily_US', 'derived_data')
 
 # =============================================================================
 # FILE NAMES AND PATTERNS
