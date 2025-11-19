@@ -129,7 +129,14 @@ def select_feature_cols(df, strategy='all'):
         
     Returns:
         list: Selected feature column names
+
+    Strategy: 
+    - all: select all features
+    - completeness: select features with completeness >= COMPLETENESS_THRESHOLD
+    - current: select features with _current
+    - change: select features with _change
     """
+
     # Identify feature columns
     feature_cols = [col for col in df.columns if '_current' in col or '_change' in col]
     if len(feature_cols) == 0:
@@ -163,7 +170,12 @@ def apply_imputation(X_train, X_val, imputation_strategy='none'):
         
     Returns:
         tuple: (X_train_imputed, X_val_imputed)
+
+    Strategy:
+    - none: do not impute
+    - median: impute with median of the training data
     """
+
     if imputation_strategy == 'median':
         # Simple median imputation (baseline approach)
         X_train_imputed = X_train.fillna(X_train.median())
@@ -257,13 +269,22 @@ def build_baseline_model(X_train, X_val, y_train, y_val, feature_cols):
         print(f"   Recall: {best_model_perf['recall']:.4f}")
         print(f"   ROC-AUC: {best_model_perf['roc_auc']:.4f}")
         
-        # Show top 10 features
-        print(f"\n🔍 Top 10 Most Important Features:")
-        print("=" * 50)
-        for i, row in best_model_perf['feature_importance'].head(10).iterrows():
-            print(f"  {i:2d}. {row['feature']:<30} {row['importance']:.4f}")
+        # Show top 20 features with correlation to label
+        print(f"\n🔍 Top 20 Most Important Features (with correlation to label):")
+        print("=" * 80)
+        top_features_df = best_model_perf['feature_importance'].head(20)
+        for i, row in top_features_df.iterrows():
+            feature_name = row['feature']
+            importance = row['importance']
+            # Calculate correlation between feature and label
+            if feature_name in X_train.columns:
+                correlation = X_train[feature_name].corr(y_train)
+            else:
+                correlation = float('nan')
+            print(f"  {i:2d}. {feature_name:<30} Importance: {importance:.4f}  Correlation: {correlation:.4f}")
         
-        if FEATURE_IMPORTANCE_RANKING_FLAG:
+        if FEATURE_IMPORTANCE_RANKING_FLAG: # If True, retrain model with top K features based on importance
+
             # Get feature importance ranking (descending order)
             feature_importance_ranking = best_model_perf['feature_importance'].sort_values('importance', ascending=False)
             top_k_features = feature_importance_ranking.head(TOP_K_FEATURES)['feature'].tolist()
@@ -469,7 +490,10 @@ def long_term_gain_from_invest_record(df_invest_record, num_months_horizon):
         on=['ticker', 'year_month'],
         how='inner'
     )
+    result_df.sort_values(by=['year_month', 'rank'], ascending=True, inplace=True)
+    result_df.to_csv('invest_record_12month_gain.csv', index=False)
     
+    # aggregate by year_month to get the average return for each month
     result_df_agg_by_month = result_df.groupby('year_month').agg({'price_return': 'mean'}).reset_index()
     print(result_df_agg_by_month.sort_values(by='year_month', ascending=True))
     print('average return: ', result_df_agg_by_month['price_return'].mean())
@@ -478,9 +502,7 @@ def long_term_gain_from_invest_record(df_invest_record, num_months_horizon):
     )
     print('return cgt adjusted: ', result_df_agg_by_month['price_return_cgt_adjusted'].mean())
     
-    result_df.sort_values(by=['year_month', 'rank'], ascending=True, inplace=True)
-    result_df.to_csv('result_df.csv', index=False)
-    return result_df
+    return result_df_agg_by_month
 
 
 def main():
@@ -533,9 +555,13 @@ def main():
     print("Testing Investment Performance...")
     print("="*60)
     df_invest_record = invest_top10_per_month(df)
-    df_long_term_gain = long_term_gain_from_invest_record(df_invest_record, num_months_horizon=12)
-    print(df_long_term_gain)
-    
+
+    # though the model is trained on short-term (1-mo or 3-mo) up/down trends, 
+    # the model may be useful for picking stocks with long-term potential.  
+    # calculate the long-term gain from the investment record for 12 months horizon
+    df_long_term_gain_by_month = long_term_gain_from_invest_record(df_invest_record, 
+                                                         num_months_horizon=12)  
+ 
 
 
 if __name__ == "__main__":
