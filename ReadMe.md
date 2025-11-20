@@ -17,9 +17,9 @@ The project processes SEC XBRL data to extract financial features and correlates
 ### Python Files
 
 #### Data Download and Population
-- **`populate_data.py`** - Downloads SEC XBRL data to local `/data/` directory. This is a sample implementation that downloads only the 4 quarters of 2022 data for demonstration purposes.
+- **`download_sec.py`** - Comprehensive SEC data downloader (previously `Populate_All_Data.py`). Discovers and downloads multiple quarters/years with retry logic and progress reporting.
 
-- **`Populate_All_Data.py`** - Enhanced version of `populate_data.py` with expanded capabilities to download data from many more quarters. Designed for comprehensive data collection across multiple years.
+- **`archive/populate_data.py`** - Legacy lightweight sample downloader for the 2022 quarters. Kept for quick demos but no longer part of the main pipeline.
 
 #### Data Exploration and Analysis
 - **`exploreTags.py`** - Explores and analyzes tags within the XBRL data. Helps identify the most relevant financial metrics and tags for feature engineering.
@@ -29,7 +29,8 @@ The project processes SEC XBRL data to extract financial features and correlates
 - **`validate_featurized_data.py`** - Debugging and validation tool for the featurization process. Ensures data quality and correctness of the feature engineering pipeline.
 
 #### Stock Price Analysis
-- **`download_sec_yf.py`** - Downloads stock price data using Yahoo Finance API and computes price trend labels with 1 or 3-month look-ahead horizons. Handles CIK-to-ticker mapping, batch processing, and trend calculation. Outputs stock price data and trend labels to the `stock_data/` directory. Note: Yahoo Finance may impose rate limit. May need to refresh IP address. 
+- **`download_stock_stooq.py`** - Downloads stock price data from the Stooq dataset (formerly `stock_stooq.py`) and computes price trend labels with 1 or 3-month look-ahead horizons. Handles CIK-to-ticker mapping, batch processing, and trend calculation. Outputs stock price data and trend labels to the `stock_data/` directory.
+- **`archive/download_sec_yf.py`** - Deprecated Yahoo Finance downloader retained for reference.
 
 #### Machine Learning
 - **`baseline_model.py`** - Implements baseline machine learning models for predicting stock price trends using the featurized financial data.
@@ -65,11 +66,11 @@ pip install -r requirements.txt
 
 ### 1. Download SEC Data
 ```bash
-# For sample data (2022 quarters only)
-python populate_data.py
+# Comprehensive data collection
+python download_sec.py
 
-# For comprehensive data collection
-python Populate_All_Data.py
+# (Optional) sample 2022-only dataset
+python archive/populate_data.py
 ```
 
 ### 2. Explore and Featurize Data
@@ -86,8 +87,8 @@ python validate_featurized_data.py
 
 ### 3. Download Stock Prices and Calculate Trends
 ```bash
-# Download stock data and compute trend labels
-python download_sec_yf.py
+# Download stock data from Stooq and compute trend labels
+python download_stock_stooq.py
 ```
 
 ### 4. Build Machine Learning Models

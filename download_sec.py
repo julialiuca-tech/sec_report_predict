@@ -24,6 +24,8 @@ from urllib.parse import urljoin, urlparse
 import time
 from pathlib import Path
 
+from config import DATA_BASE_DIR
+
 def get_available_datasets(base_url="https://www.sec.gov/files/dera/data/financial-statement-data-sets/"):
     """
     Scrapes the SEC server to discover all available dataset files
@@ -247,7 +249,7 @@ def main():
     print("=" * 50)
     
     # Create the data directory if it doesn't exist
-    data_dir = Path("examples/data")
+    data_dir = Path(DATA_BASE_DIR)
     data_dir.mkdir(parents=True, exist_ok=True)
     
     # Discover available datasets
