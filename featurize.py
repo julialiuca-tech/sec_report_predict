@@ -1,17 +1,18 @@
+import pandas as pd
+import numpy as np
+import os
+
 from utility_data import load_and_join_sec_xbrl_data, print_featurization, read_tags_to_featurize, get_cik_ticker_mapping
 from config import (
     SAVE_DIR, DATA_BASE_DIR, FEATURIZED_ALL_QUARTERS_FILE, FEATURE_COMPLETENESS_RANKING_FILE,
     FEATURIZED_SIMPLIFIED_FILE, QUARTER_FEATURIZED_PATTERN, DEFAULT_K_TOP_TAGS,
     DEFAULT_MIN_COMPLETENESS, DEFAULT_DEBUG_FLAG, DEFAULT_N_QUARTERS_HISTORY_COMP
 )
-import pandas as pd
-import numpy as np
-import os
+from download_sec import download_all_sec_datasets
 
 # =============================================================================
-# QUARTER MAPPING CONSTANTS
+# QUARTER MAPPING CONSTANTS, used in history_comparisons()
 # =============================================================================
-
 # Quarter to days mapping
 QUARTER_DAYS = {
     0: 0,      # No quarter
@@ -21,10 +22,11 @@ QUARTER_DAYS = {
     4: 365,    # 4 quarters (1 year)
     8: 730     # 8 quarters (2 years)
 }
+DAYS_TO_QUARTER = {v: k for k, v in QUARTER_DAYS.items()}  # reverse mapping
 
-# Reverse mapping: days to quarter
-DAYS_TO_QUARTER = {v: k for k, v in QUARTER_DAYS.items()}
-
+# =============================================================================
+# SEGMENT GROUP SUMMARY FUNCTION
+# =============================================================================
 def segment_group_summary(df_joined, form_type, debug_print=DEFAULT_DEBUG_FLAG):
     """
     Utility function to identify segment groups in SEC filings and return 
@@ -698,23 +700,28 @@ def featurize_multi_qtrs(data_directories,
     df_featurized_all_quarters.to_csv(os.path.join(save_dir, FEATURIZED_ALL_QUARTERS_FILE), index=False)
 
 
-def simplify_featurized_data(processed_data_dir=SAVE_DIR, min_completeness=DEFAULT_MIN_COMPLETENESS):
+def filter_featured_data_by_completeness(processed_data_dir=SAVE_DIR, min_completeness=DEFAULT_MIN_COMPLETENESS):
     """
-    Simplify the featurized data by keeping only well-populated features and removing duplicates.
+    Filter featurized data by feature completeness threshold and remove duplicates.
     
-    This function:
+    This function filters the featurized data to keep only features that meet a minimum
+    completeness threshold. It also performs additional data cleaning steps:
+    
     1. Reads the featurized_all_quarters.csv file
     2. Filters out CIKs that don't map to ticker symbols (for stock price data availability)
     3. Reads the feature_completeness_ranking.csv file
-    4. Keeps only columns that are more than min_completeness% populated
+    4. Keeps only columns (features) that are more than min_completeness% populated
     5. For duplicate (cik, period) combinations, retains only the most recent record (max data_qtr)
+    6. Saves the filtered data to featurized_simplified.csv
     
     Args:
         processed_data_dir (str): Directory containing the processed data files
         min_completeness (float): Minimum completeness percentage to keep features (default: 15.0)
+                                  Features below this threshold will be excluded.
         
     Returns:
-        pd.DataFrame: Simplified featurized data with well-populated features and no duplicates
+        pd.DataFrame: Filtered featurized data with only well-populated features (above threshold)
+                      and no duplicate records
     """
     # Step 1: Read the featurized_all_quarters.csv file
     featurized_file = os.path.join(processed_data_dir, FEATURIZED_ALL_QUARTERS_FILE)
@@ -775,10 +782,10 @@ def simplify_featurized_data(processed_data_dir=SAVE_DIR, min_completeness=DEFAU
     
     print(f"📊 Output data shape: {df_simplified.shape}")
     
-    # Step 6: Write the simplified dataframe to CSV file
+    # Step 6: Write the filtered dataframe to CSV file
     simplified_file = os.path.join(processed_data_dir, FEATURIZED_SIMPLIFIED_FILE)
     df_simplified.to_csv(simplified_file, index=False)
-    print(f"💾 Simplified data saved to: {simplified_file}")
+    print(f"💾 Filtered data saved to: {simplified_file}")
     
     return df_simplified
 
@@ -923,8 +930,14 @@ def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp):
     
     return df_work_w_gradient
 
+def featurize_all_sec_quarters():
+    """
+    Top-level function to featurize all SEC quarters.
+    """
 
-if __name__ == "__main__": 
+    # catch up with SEC data. This step will be automatically skipped if the data already exists.
+    download_all_sec_datasets()
+
 
     # Create tags to featurize (this can be reused across multiple quarters)
     df_tags_to_featurize = read_tags_to_featurize(K_top_tags=DEFAULT_K_TOP_TAGS)
@@ -959,7 +972,12 @@ if __name__ == "__main__":
             featurize_multi_qtrs(quarter_directories, df_tags_to_featurize, 
                                  N_qtrs_history_comp= DEFAULT_N_QUARTERS_HISTORY_COMP)
         
-        # Simplify the featurized data and save to CSV
-        print(f"\nSimplifying featurized data...")
-        df_simplified = simplify_featurized_data(processed_data_dir=SAVE_DIR, min_completeness=DEFAULT_MIN_COMPLETENESS)
+        # Filter the featurized data by completeness threshold and save to CSV
+        print(f"\nFiltering featurized data by completeness threshold...")
+        df_simplified = filter_featured_data_by_completeness(processed_data_dir=SAVE_DIR, min_completeness=DEFAULT_MIN_COMPLETENESS)
         print(f"✅ Featurization pipeline completed successfully!")
+
+
+
+if __name__ == "__main__": 
+    featurize_all_sec_quarters()

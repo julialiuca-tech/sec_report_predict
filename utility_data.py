@@ -129,7 +129,7 @@ def read_tags_to_featurize(K_top_tags=50):
     print(f"Creating tags to featurize dataframe for top {K_top_tags} tags...")
     
     # Read the top tags from tag_stats_sorted.csv
-    tag_stats = pd.read_csv(DATA_DIR + 'tag_stats_sorted.csv', index_col=0)
+    tag_stats = pd.read_csv(os.path.join(DATA_DIR, 'tag_stats_sorted.csv'), index_col=0)
     df_tags_to_featurize = pd.DataFrame({
         'rank': range(1, K_top_tags + 1),
         'tag': tag_stats.head(K_top_tags).index.tolist()

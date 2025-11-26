@@ -241,7 +241,7 @@ def sort_datasets_by_recency(dataset_urls):
     
     return sorted_datasets
 
-def main():
+def download_all_sec_datasets():
     """
     Main function to discover and download all available SEC datasets
     """
@@ -312,4 +312,4 @@ def main():
         print("\nYou can run this script again to retry failed downloads.")
 
 if __name__ == "__main__":
-    main()
+    download_all_sec_datasets()
