@@ -284,7 +284,6 @@ def build_baseline_model(X_train, X_val, y_train, y_val, feature_cols):
             print(f"  {i:2d}. {feature_name:<30} Importance: {importance:.4f}  Correlation: {correlation:.4f}")
         
         if FEATURE_IMPORTANCE_RANKING_FLAG: # If True, retrain model with top K features based on importance
-
             # Get feature importance ranking (descending order)
             feature_importance_ranking = best_model_perf['feature_importance'].sort_values('importance', ascending=False)
             top_k_features = feature_importance_ranking.head(TOP_K_FEATURES)['feature'].tolist()
@@ -561,7 +560,7 @@ def main():
     # calculate the long-term gain from the investment record for 12 months horizon
     df_long_term_gain_by_month = long_term_gain_from_invest_record(df_invest_record, 
                                                          num_months_horizon=12)  
- 
+    
 
 
 if __name__ == "__main__":

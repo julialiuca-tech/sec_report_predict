@@ -615,7 +615,7 @@ def load_stooq_stock_data() -> pd.DataFrame:
     mapped_count = df_combined['cik'].notna().sum()
     total_count = len(df_combined)
     print(f"✅ Mapped {mapped_count:,} out of {total_count:,} records ({mapped_count/total_count*100:.1f}%)")
-    
+
     # Reorder columns
     df_combined = df_combined[['ticker', 'cik', 'exchange', 'date', 'close_price']]
     
@@ -688,7 +688,7 @@ if __name__ == "__main__":
     # Always regenerate month_end_price from source data to ensure it's up-to-date
     print("🔄 Loading stock data and generating month-end prices...")
     df_combined = load_stooq_stock_data()
-    
+        
     if df_combined.empty:
         print("\n❌ No stock data loaded. Exiting.")
         exit(1)
@@ -701,7 +701,7 @@ if __name__ == "__main__":
     # print('debugging trace: removed tickers with max gap > 7 days:', removed_ticker_info[:5])
 
     month_end_df = month_end_price_stooq(df_combined)
-    
+
     # Apply filters before saving
     month_end_df = remove_cik_w_missing_month(month_end_df)
     month_end_df = filter_by_price_range(month_end_df, 'close_price', min_price=1, max_price=1000)
@@ -718,7 +718,7 @@ if __name__ == "__main__":
             output_file = os.path.join(STOOQ_SAVE_DIR, f'price_trends_{horizon}month.csv')
             trend_df.to_csv(output_file, index=False)
             print(f"\n💾 {horizon}-month trends saved to: {output_file}")
-    
+
     print("\n" + "=" * 80)
     print("🎉 Stock data processing complete!")
     print("=" * 80)
