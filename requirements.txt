@@ -27,6 +27,9 @@ tqdm>=4.64.0
 joblib>=1.1.0
 yfinance>=0.2.0
 
-# Optional: Deep learning (uncomment if needed)
-# torch>=1.12.0
+# Financial domain semantic similarity
+sentence-transformers>=2.2.0
+torch>=1.12.0
+
+# Optional: Additional deep learning (uncomment if needed)
 # tensorflow>=2.9.0
