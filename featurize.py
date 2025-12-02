@@ -936,8 +936,7 @@ def featurize_all_sec_quarters():
     """
 
     # catch up with SEC data. This step will be automatically skipped if the data already exists.
-    download_all_sec_datasets()
-
+    flag_new_data_downloaded = download_all_sec_datasets()
 
     # Create tags to featurize (this can be reused across multiple quarters)
     df_tags_to_featurize = read_tags_to_featurize(K_top_tags=DEFAULT_K_TOP_TAGS)
@@ -962,6 +961,12 @@ def featurize_all_sec_quarters():
     if quarter_directories:
         # Check if combined featurized file already exists
         combined_file = os.path.join(SAVE_DIR, FEATURIZED_ALL_QUARTERS_FILE)
+        
+        # If new data was downloaded, delete the existing combined file to force reprocessing
+        if flag_new_data_downloaded and os.path.exists(combined_file):
+            print(f"🗑️  New data downloaded. Deleting existing combined featurized file: {combined_file}")
+            os.remove(combined_file)
+            print(f"✅ Deleted {combined_file}")
         
         if os.path.exists(combined_file):
             print(f"✅ Combined featurized file already exists: {combined_file}")

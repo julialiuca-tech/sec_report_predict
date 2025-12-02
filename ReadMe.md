@@ -116,7 +116,7 @@ pip install -r requirements.txt
 
 ## Usage
 
-### 1. Download SEC Data
+### 1. Download SEC Data 
 
 Download SEC XBRL data for all available quarters (2015-2025):
 
@@ -141,6 +141,8 @@ python featurize.py
 # Validate featurization results
 python validate_featurized_data.py
 ```
+
+NOTE: One can also run "python featurize.py" to catch up on SEC data. 
 
 ### 3. Prepare and Process Stock Data
 

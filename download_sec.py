@@ -243,7 +243,10 @@ def sort_datasets_by_recency(dataset_urls):
 
 def download_all_sec_datasets():
     """
-    Main function to discover and download all available SEC datasets
+    Main function to discover and download all available SEC datasets.
+    
+    Returns:
+        bool: True if any new datasets were downloaded, False otherwise.
     """
     print("SEC Financial Statement Datasets Downloader")
     print("=" * 50)
@@ -257,7 +260,7 @@ def download_all_sec_datasets():
     
     if not dataset_urls:
         print("No datasets discovered. Exiting.")
-        return
+        return False
     
     # Sort datasets by recency (most recent first)
     print(f"\nSorting {len(dataset_urls)} datasets by recency...")
@@ -310,6 +313,9 @@ def download_all_sec_datasets():
         print("- Network issues")
         print("- Server restrictions")
         print("\nYou can run this script again to retry failed downloads.")
+    
+    # Return True if any new data was downloaded
+    return successful_downloads > 0
 
 if __name__ == "__main__":
     download_all_sec_datasets()
