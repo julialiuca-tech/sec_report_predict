@@ -56,10 +56,16 @@ TREND_HORIZON_IN_MONTHS= 3
 STOCK_TREND_DATA_FILE = os.path.join(STOCK_DIR, f'price_trends_{TREND_HORIZON_IN_MONTHS}month.csv')
 MONTH_END_PRICE_FILE = os.path.join(STOCK_DIR, 'month_end_price_stooq.csv')
 
+# parameters for feature augmentation  
 
 # =============================================================================
 # MACHINE LEARNING PARAMETERS
 # =============================================================================
+USE_RATIO_FEATURES = True
+FILTER_OUTLIERS_FROM_RATIOS = True
+SUFFIXES_TO_ENHANCE_W_GRADIENT = ['_current', '_augment']
+# Feature suffixes to use for ML model training (based on USE_RATIO_FEATURES flag)
+FEATURE_SUFFIXES = ['_current', '_augment'] if USE_RATIO_FEATURES else ['_current']
 QUARTER_GRADIENTS = [1, 2, 4]
 TOP_K_FEATURES = 200
 FEATURE_IMPORTANCE_RANKING_FLAG = False  # If True, retrain model with top K features based on importance

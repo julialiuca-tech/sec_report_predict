@@ -790,35 +790,50 @@ def filter_featured_data_by_completeness(processed_data_dir=SAVE_DIR, min_comple
     return df_simplified
 
 
-def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp):
+def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp, suffixes_to_enhance=None):
     """
     Enhance featurized data with gradient features by computing relative changes
     from previous quarters.
     
     Args:
-        df_work (pd.DataFrame): Input dataframe with features ending in '_current'
+        df_work (pd.DataFrame): Input dataframe with features
         quarters_for_gradient_comp (list): List of quarters to compute gradients from (e.g., [1, 2] for 1 and 2 quarters ago)
+        suffixes_to_enhance (list, optional): List of suffixes to compute gradients for. 
+                                             Defaults to ['_current'] for backward compatibility.
+                                             Example: ['_current', '_augment'] will process features ending with either suffix.
     
     This function:
     1. Takes the input dataframe df_work
-    2. For each feature ending with "_current", looks up values from specified quarters ago
+    2. For each feature ending with any suffix in suffixes_to_enhance, looks up values from specified quarters ago
     3. Computes relative change percentages and creates new features with "_change_q{N}" suffixes
     4. Returns enhanced dataframe with gradient features
     
     Returns:
         pd.DataFrame: Enhanced dataframe with gradient features (df_work_w_gradient)
     """
+    # Set default suffix if not provided (backward compatibility)
+    if suffixes_to_enhance is None:
+        suffixes_to_enhance = ['_current']
+    
     print("🔄 Enhancing features with gradient information...")
     print("=" * 60)
     
     print(f"📊 Input dataframe shape: {df_work.shape}")
     
-    # Identify features ending with "_current"
-    current_features = [col for col in df_work.columns if col.endswith('_current')]
-    print(f"🔍 Found {len(current_features)} features ending with '_current'")
+    # Identify features ending with any of the specified suffixes
+    features_to_enhance = []
+    for suffix in suffixes_to_enhance:
+        matching_features = [col for col in df_work.columns if col.endswith(suffix)]
+        features_to_enhance.extend(matching_features)
+        print(f"🔍 Found {len(matching_features)} features ending with '{suffix}'")
     
-    if not current_features:
-        print("⚠️  No features ending with '_current' found. Returning original dataframe.")
+    # Remove duplicates (in case a column somehow matches multiple suffixes)
+    features_to_enhance = list(set(features_to_enhance))
+    
+    print(f"📋 Total unique features to enhance: {len(features_to_enhance)}")
+    
+    if not features_to_enhance:
+        print(f"⚠️  No features ending with any of {suffixes_to_enhance} found. Returning original dataframe.")
         return df_work
     
     # Convert period to datetime for easier manipulation
@@ -842,21 +857,21 @@ def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp):
     
     print(f"📈 Computing gradient features for quarters: {quarters_for_gradient_comp}")
     
-    # Prepare historical data with all current features for each quarter
+    # Prepare historical data with all features to enhance for each quarter
     historical_subsets = {}
     total_duplicates = 0
     
     for q in quarters_for_gradient_comp:
         # Note: Main deduplication is handled upstream, but we need to dedupe historical data
         # since shifting periods might create new duplicates
-        df_historical_subset = historical_data[q][['cik', 'period'] + current_features].drop_duplicates(subset=['cik', 'period'])
+        df_historical_subset = historical_data[q][['cik', 'period'] + features_to_enhance].drop_duplicates(subset=['cik', 'period'])
         
         # Rename columns to indicate they're from previous quarters
-        q_columns = {feature: f'{feature}_q{q}' for feature in current_features}
+        q_columns = {feature: f'{feature}_q{q}' for feature in features_to_enhance}
         df_historical_subset = df_historical_subset.rename(columns=q_columns)
         
         # Debug: Check for duplicates in historical data
-        original_count = len(historical_data[q][['cik', 'period'] + current_features])
+        original_count = len(historical_data[q][['cik', 'period'] + features_to_enhance])
         deduped_count = len(df_historical_subset)
         duplicates = original_count - deduped_count
         total_duplicates += duplicates
@@ -875,7 +890,7 @@ def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp):
         print(f"⚠️  Warning: Row count changed from {len(df_work)} to {len(df_work_w_gradient)}")
     
     # Compute all gradient features at once using vectorized operations
-    print(f"🔄 Computing gradients for {len(current_features)} features across {len(quarters_for_gradient_comp)} quarters...")
+    print(f"🔄 Computing gradients for {len(features_to_enhance)} features across {len(quarters_for_gradient_comp)} quarters...")
     
     # Create all gradient feature names and compute gradients for each quarter
     all_gradient_features = []
@@ -884,17 +899,31 @@ def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp):
     
     for q in quarters_for_gradient_comp:
         # Create gradient feature names for this quarter
-        q_features = [f"{feature.replace('_current', '')}_change_q{q}" for feature in current_features]
+        # For each feature, remove its suffix and add _change_q{N}
+        q_features = []
+        valid_features = []  # Track features that successfully match a suffix
+        
+        for feature in features_to_enhance:
+            # Find which suffix this feature ends with
+            base_feature = None
+            for suffix in suffixes_to_enhance:
+                if feature.endswith(suffix):
+                    base_feature = feature[:-len(suffix)]  # Remove the suffix
+                    break
+            if base_feature is not None:
+                q_features.append(f"{base_feature}_change_q{q}")
+                valid_features.append(feature)
+        
         all_gradient_features.extend(q_features)
         
-        # Get historical columns for this quarter
-        q_current_cols = [f'{feature}_q{q}' for feature in current_features]
-        temp_columns_to_remove.extend(q_current_cols)
+        # Get historical columns for this quarter (only for valid features)
+        q_historical_cols = [f'{feature}_q{q}' for feature in valid_features]
+        temp_columns_to_remove.extend(q_historical_cols)
         
-        # Vectorized computation for gradients
+        # Vectorized computation for gradients (only for valid features)
         with np.errstate(divide='ignore', invalid='ignore'):
-            q_gradients = (df_work_w_gradient[current_features].values - df_work_w_gradient[q_current_cols].values) / df_work_w_gradient[q_current_cols].values
-        q_gradients = np.where(df_work_w_gradient[q_current_cols].values != 0, q_gradients, np.nan)
+            q_gradients = (df_work_w_gradient[valid_features].values - df_work_w_gradient[q_historical_cols].values) / df_work_w_gradient[q_historical_cols].values
+        q_gradients = np.where(df_work_w_gradient[q_historical_cols].values != 0, q_gradients, np.nan)
         
         # Create gradient DataFrame for this quarter
         q_gradient_df = pd.DataFrame(q_gradients, columns=q_features, index=df_work_w_gradient.index)

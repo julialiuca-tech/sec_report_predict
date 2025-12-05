@@ -824,7 +824,8 @@ def main():
     Main function to spot check SEC reports and find tag matches for key metrics.
     Uses cached pickle file if available to avoid recomputing matches.
     """
-    pickle_file = os.path.join(DATA_BASE_DIR, 'metric_all_matches.pkl')
+    # pickle_file = os.path.join(DATA_BASE_DIR, 'metric_all_matches.pkl')
+    pickle_file = 'metric_all_matches.pkl'
     
     # Check if pickle file exists
     if os.path.exists(pickle_file):

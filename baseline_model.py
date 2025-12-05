@@ -17,6 +17,7 @@ Future ML pipeline components:
 """
 
 import pandas as pd
+import numpy as np
 
 # Import utility functions
 from utility_binary_classifier import split_train_val_by_column, baseline_binary_classifier
@@ -25,13 +26,26 @@ from config import COMPLETENESS_THRESHOLD, Y_LABEL, SPLIT_STRATEGY, QUARTER_GRAD
 from config import TOP_K_FEATURES, FEATURE_IMPORTANCE_RANKING_FLAG
 from config import TREND_HORIZON_IN_MONTHS, INVEST_EXP_START_MONTH_STR, INVEST_EXP_END_MONTH_STR
 from config import FEATURIZED_ALL_QUARTERS_FILE, STOCK_TREND_DATA_FILE, MONTH_END_PRICE_FILE
+from config import USE_RATIO_FEATURES, FILTER_OUTLIERS_FROM_RATIOS, SUFFIXES_TO_ENHANCE_W_GRADIENT
+from config import FEATURE_SUFFIXES
 import xgboost as xgb
 from featurize import enhance_tags_w_gradient, summarize_feature_completeness
-
-
-
+from feature_augment import compute_ratio_features, flag_outliers_by_hard_limits
 
 TEST_CUTOFF_DATE = 20241231
+
+def collect_column_names_w_suffix(cols, suffixes):
+    """
+    Collect column names that end with any suffix in the suffixes list.
+    
+    Args:
+        cols (list): List of column names to check
+        suffixes (list): List of suffixes to match against
+        
+    Returns:
+        list: List of column names that end with any suffix in the suffixes list
+    """
+    return [col for col in cols if any(col.endswith(suffix) for suffix in suffixes)]
 
 def prep_data_feature_label(featurized_data_file=FEATURIZED_ALL_QUARTERS_FILE, 
                              stock_trend_data_file=STOCK_TREND_DATA_FILE, 
@@ -61,10 +75,23 @@ def prep_data_feature_label(featurized_data_file=FEATURIZED_ALL_QUARTERS_FILE,
         print(f"🧹 Removed {initial_count - final_count:,} duplicate records (cik, period)")
         print(f"Features after deduplication: {df_features.shape}")
 
+    # augment with ratio features 
+    if USE_RATIO_FEATURES:
+        df_features = compute_ratio_features(df_features)
+        print(f"Ratio features computed: {df_features.shape}") 
+    # filter outliers from ratio features
+    if FILTER_OUTLIERS_FROM_RATIOS:
+        df_features = flag_outliers_by_hard_limits(df_features)
+        df_features = df_features[df_features['flag_outlier'] == False]
+        df_features.drop(columns=['flag_outlier'], inplace=True)
+        print(f"Outliers filtered from ratio features: {df_features.shape} records remaining") 
+
+    # enhance with gradient features
     if quarters_for_gradient_comp is not None:
-        df_features = enhance_tags_w_gradient(df_features, quarters_for_gradient_comp)
-        print(f"Gradient features loaded: {df_features.shape}")
-        print("columns: ", df_features.columns)
+        df_features = enhance_tags_w_gradient(df_features, 
+                                              quarters_for_gradient_comp, 
+                                              suffixes_to_enhance=SUFFIXES_TO_ENHANCE_W_GRADIENT)
+        print(f"Gradient features loaded: {df_features.shape}") 
     
     # Load ground truth -- stock price trends
     df_trends = pd.read_csv(stock_trend_data_file)
@@ -133,12 +160,13 @@ def select_feature_cols(df, strategy='all'):
     Strategy: 
     - all: select all features
     - completeness: select features with completeness >= COMPLETENESS_THRESHOLD
-    - current: select features with _current
+    - current: select features with suffixes in FEATURE_SUFFIXES
     - change: select features with _change
     """
 
-    # Identify feature columns
-    feature_cols = [col for col in df.columns if '_current' in col or '_change' in col]
+    # Identify feature columns (any suffix in FEATURE_SUFFIXES or contains '_change')
+    suffix_cols = collect_column_names_w_suffix(df.columns, FEATURE_SUFFIXES)
+    feature_cols = suffix_cols + [col for col in df.columns if '_change' in col and col not in suffix_cols]
     if len(feature_cols) == 0:
         print("❌ No feature columns found for feature selection.")
         return []
@@ -153,7 +181,7 @@ def select_feature_cols(df, strategy='all'):
         return filtered_features
     
     if strategy == 'current': 
-        return [col for col in feature_cols if '_current' in col]
+        return collect_column_names_w_suffix(feature_cols, FEATURE_SUFFIXES)
     
     if strategy == 'change':
         return [col for col in feature_cols if '_change' in col]
@@ -186,17 +214,14 @@ def apply_imputation(X_train, X_val, imputation_strategy='none'):
         return X_train.copy(), X_val.copy()
 
 
-
-def build_baseline_model(X_train, X_val, y_train, y_val, feature_cols):
+def build_baseline_model(df_train, df_val, feature_cols):
     """
     Build and evaluate baseline models with different feature selection and imputation strategies.
     
     Args:
-        X_train (pd.DataFrame): Training features
-        X_val (pd.DataFrame): Validation features
-        y_train (pd.Series): Training target labels
-        y_val (pd.Series): Validation target labels
-        feature_cols (list): List of feature column names
+        df_train (pd.DataFrame): Training dataframe with features and labels
+        df_val (pd.DataFrame): Validation dataframe with features and labels
+        feature_cols (list): List of feature column names to use
         
     Returns:
         tuple: (model_perf_records, feature_importance_ranking)
@@ -205,6 +230,12 @@ def build_baseline_model(X_train, X_val, y_train, y_val, feature_cols):
     """
     print(f"\n" + "="*60)
     print("Testing Different Missing Value Handling Approaches...")
+
+    # Extract features and labels from dataframes
+    X_train = df_train[feature_cols].copy()
+    X_val = df_val[feature_cols].copy()
+    y_train = df_train[Y_LABEL].copy()
+    y_val = df_val[Y_LABEL].copy()
 
     model_perf_records = {}
     feature_selection_strategy_list = ['completeness', 'current', 'change', 'all']
@@ -230,11 +261,17 @@ def build_baseline_model(X_train, X_val, y_train, y_val, feature_cols):
              X_train_imputed, X_val_imputed = apply_imputation(X_train_filtered, X_val_filtered, imputation)
              for model_name in model_type_list:
                  try:
-                     model_perf = baseline_binary_classifier(X_train_imputed, X_val_imputed, y_train, y_val, model_name)
-                     model_perf_records[f"{selection}_{imputation}_{model_name}"] = model_perf
+                    model_perf = baseline_binary_classifier(X_train_imputed, X_val_imputed, y_train, y_val, model_name)
+                    # get additional performance metric: correlation between confidence and growth
+                    y_pred_proba = model_perf['trained_model'].predict_proba(X_val_imputed)[:, 1]
+                    corr_confidence_w_growth = np.corrcoef(y_pred_proba, df_val['price_return'])[0, 1]
+                    model_perf['corr_confidence_w_growth'] = corr_confidence_w_growth
+                    # collect performance records 
+                    model_perf_records[f"{selection}_{imputation}_{model_name}"] = model_perf 
                  except Exception as e:
                      print(f"❌ Error with {selection}_{imputation}_{model_name}: {str(e)}")
                      model_perf_records[f"{selection}_{imputation}_{model_name}"] = None
+                
 
     
     # 4. Compare results and recommend best approach
@@ -251,7 +288,8 @@ def build_baseline_model(X_train, X_val, y_train, y_val, feature_cols):
                 'Accuracy': f"{model_perf['accuracy']:.4f}",
                 'Precision': f"{model_perf['precision']:.4f}",
                 'Recall': f"{model_perf['recall']:.4f}",
-                'ROC-AUC': f"{model_perf['roc_auc']:.4f}"
+                'ROC-AUC': f"{model_perf['roc_auc']:.4f}",
+                'Corr_Confidence_Growth': f"{model_perf['corr_confidence_w_growth']:.4f}"
             })
     
     if comparison_data:
@@ -268,6 +306,7 @@ def build_baseline_model(X_train, X_val, y_train, y_val, feature_cols):
         print(f"   Precision: {best_model_perf['precision']:.4f}")
         print(f"   Recall: {best_model_perf['recall']:.4f}")
         print(f"   ROC-AUC: {best_model_perf['roc_auc']:.4f}")
+        print(f"   Corr_Confidence_Growth: {best_model_perf['corr_confidence_w_growth']:.4f}")
         
         # Show top 20 features with correlation to label
         print(f"\n🔍 Top 20 Most Important Features (with correlation to label):")
@@ -300,6 +339,7 @@ def build_baseline_model(X_train, X_val, y_train, y_val, feature_cols):
             print(f"   Precision: {retrained_model_perf['precision']:.4f}")
             print(f"   Recall: {retrained_model_perf['recall']:.4f}")
             print(f"   ROC-AUC: {retrained_model_perf['roc_auc']:.4f}")
+            print(f"   Corr_Confidence_Growth: {retrained_model_perf['corr_confidence_w_growth']:.4f}")
         else:
             feature_importance_ranking = None
     else:
@@ -371,7 +411,8 @@ def invest_top10_per_month(df):
     """  
 
     # Get feature columns from the full dataset
-    feature_cols = [f for f in df.columns if '_current' in f or '_change' in f]
+    suffix_cols = collect_column_names_w_suffix(df.columns, FEATURE_SUFFIXES)
+    feature_cols = suffix_cols + [f for f in df.columns if '_change' in f and f not in suffix_cols]
     
     # Define the range of months to test
     import pandas as pd
@@ -527,24 +568,29 @@ def main():
                                                 train_val_split_prop=0.7,    
                                                 train_val_split_strategy=SPLIT_STRATEGY)
     
-    # Prepare features and target
-    feature_cols = [f for f in df_train.columns if '_current' in f or '_change' in f]
-    X_train = df_train[feature_cols].copy()
-    X_val = df_val[feature_cols].copy()
-    y_train = df_train[Y_LABEL].copy()
-    y_val = df_val[Y_LABEL].copy()
+    # Prepare feature columns with 
+    suffix_cols = collect_column_names_w_suffix(df_train.columns, FEATURE_SUFFIXES)
+    feature_cols = suffix_cols + [f for f in df_train.columns if '_change' in f and f not in suffix_cols]
  
-    # Build and compare models
+    # Build and compare model
     print(f"\n" + "="*60)
     print("Building and Comparing ML Models...")
-    model_perf_records, feature_importance_ranking = \
-         build_baseline_model(X_train, X_val, y_train, y_val, feature_cols)
-  
+    model_perf_records, feature_importance_ranking = build_baseline_model(df_train, df_val, feature_cols)
+
+    # for comparison, build a model without _augment features 
+    print(f"\n" + "="*60)
+    print("Building and Comparing ML Models without _augment features...")
+    suffix_cols = collect_column_names_w_suffix(df_train.columns, ['_current'])
+    feature_cols = suffix_cols + [f for f in df_train.columns if '_change' in f and f not in suffix_cols]
+    model_perf_records_no_augment, feature_importance_ranking_no_augment = build_baseline_model(df_train, df_val, feature_cols)
+
+    # if FEATURE_IMPORTANCE_RANKING_FLAG is True, remake the dataframe with top K features
     if FEATURE_IMPORTANCE_RANKING_FLAG:
         # Get top K features
         top_k_features = feature_importance_ranking.head(TOP_K_FEATURES)['feature'].tolist()
         # Keep non-feature columns (cik, period, year_month, ticker, price_return, etc.)
-        non_feature_cols = [col for col in df.columns if '_current' not in col and '_change' not in col]
+        suffix_cols = collect_column_names_w_suffix(df.columns, FEATURE_SUFFIXES)
+        non_feature_cols = [col for col in df.columns if col not in suffix_cols and '_change' not in col]
         df_filtered = df[non_feature_cols + top_k_features].copy()
         print(f"📊 Original dataframe shape: {df.shape}", f"📊 Filtered dataframe shape: {df_filtered.shape}")
         df = df_filtered 
