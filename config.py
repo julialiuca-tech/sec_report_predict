@@ -26,6 +26,12 @@ DATA_BASE_DIR = os.path.join(DATA_DIR, 'SEC_raw_2015_to_2025')
 # stock data 
 STOCK_DIR = os.path.join(DATA_DIR, 'stock_Stooq_daily_US', 'derived_data')
 
+# model related data
+MODEL_DIR = os.path.join(DATA_DIR, 'model_related')
+
+# model related data 
+MODEL_DIR = os.path.join(DATA_DIR, 'model_related') 
+
 # =============================================================================
 # FILE NAMES AND PATTERNS
 # =============================================================================

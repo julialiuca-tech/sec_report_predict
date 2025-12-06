@@ -16,21 +16,30 @@ Future ML pipeline components:
 - Hyperparameter tuning
 """
 
-import pandas as pd
-import numpy as np
+import os
 
-# Import utility functions
-from utility_binary_classifier import split_train_val_by_column, baseline_binary_classifier
-from utility_data import price_trend
-from config import COMPLETENESS_THRESHOLD, Y_LABEL, SPLIT_STRATEGY, QUARTER_GRADIENTS
-from config import TOP_K_FEATURES, FEATURE_IMPORTANCE_RANKING_FLAG
-from config import TREND_HORIZON_IN_MONTHS, INVEST_EXP_START_MONTH_STR, INVEST_EXP_END_MONTH_STR
-from config import FEATURIZED_ALL_QUARTERS_FILE, STOCK_TREND_DATA_FILE, MONTH_END_PRICE_FILE
-from config import USE_RATIO_FEATURES, FILTER_OUTLIERS_FROM_RATIOS, SUFFIXES_TO_ENHANCE_W_GRADIENT
-from config import FEATURE_SUFFIXES
+import numpy as np
+import pandas as pd
 import xgboost as xgb
-from featurize import enhance_tags_w_gradient, summarize_feature_completeness
+
+from config import (
+    COMPLETENESS_THRESHOLD,
+    FEATURIZED_ALL_QUARTERS_FILE,
+    FEATURE_IMPORTANCE_RANKING_FLAG,
+    FEATURE_SUFFIXES,
+    FILTER_OUTLIERS_FROM_RATIOS,
+    MODEL_DIR,
+    QUARTER_GRADIENTS,
+    SPLIT_STRATEGY,
+    STOCK_TREND_DATA_FILE,
+    SUFFIXES_TO_ENHANCE_W_GRADIENT,
+    TOP_K_FEATURES,
+    USE_RATIO_FEATURES,
+    Y_LABEL,
+)
 from feature_augment import compute_ratio_features, flag_outliers_by_hard_limits
+from featurize import enhance_tags_w_gradient
+from utility_binary_classifier import baseline_binary_classifier, split_train_val_by_column
 
 TEST_CUTOFF_DATE = 20241231
 
@@ -350,199 +359,37 @@ def build_baseline_model(df_train, df_val, feature_cols):
     return model_perf_records, feature_importance_ranking
 
 
-
-
-def top_candidate_w_return(model, df_companies, feature_cols, K=10):
+def filter_features_by_importance(df, feature_importance_ranking, top_k_features=None):
     """
-    Compute the performance of the model on the top K companies.
+    Filter dataframe to keep only top K features based on feature importance ranking.
     
     Args:
-        model: The trained model
-        df_companies: The dataframe containing the companies
-        feature_cols: The columns to use as features
-        K (int): Number of top candidates to select (default: 10)
+        df (pd.DataFrame): Input dataframe with features and non-feature columns
+        feature_importance_ranking (pd.DataFrame): DataFrame with feature importance ranking,
+                                                   must have 'feature' column
+        top_k_features (int, optional): Number of top features to keep. If None, uses TOP_K_FEATURES from config.
         
     Returns:
-        tuple: (top_k_cumulative_return, market_avg_return, top_k_tickers)
-            - top_k_cumulative_return: Cumulative average return from top K candidates
-            - market_avg_return: Average return of the market (all companies)
-            - top_k_tickers: List of top K candidates' tickers
+        pd.DataFrame: Filtered dataframe with non-feature columns + top K features
     """
-    X_companies = df_companies[feature_cols].copy()
-    y_companies = df_companies[Y_LABEL].copy() 
-
-    y_pred = model.predict(X_companies)
-    y_pred_proba = model.predict_proba(X_companies)[:, 1]
-
-    df_companies['y_pred_proba']= y_pred_proba
-    df_companies.sort_values(by= 'y_pred_proba', ascending=False, inplace=True)
-
-    # Calculate cumulative average of invest_val as we slide down the sorted dataframe
-    df_companies['cumulative_avg_return'] = df_companies['price_return'].expanding().mean()
-    df_companies['cumulative_count'] = range(1, len(df_companies) + 1)
+    if top_k_features is None:
+        top_k_features = TOP_K_FEATURES
     
-    # Calculate analysis metrics
-    # Get the cumulative return for top K candidates
-    if len(df_companies) >= K:
-        top_k_cumulative_return = df_companies.iloc[K-1]['cumulative_avg_return']
-        top_k_companies = df_companies.iloc[:K]
-    else:
-        top_k_cumulative_return = df_companies['cumulative_avg_return'].iloc[-1]
-        top_k_companies = df_companies
+    # Get top K features
+    top_k_features_list = feature_importance_ranking.head(top_k_features)['feature'].tolist()
     
-    # Get market average return (all companies)
-    market_avg_return = df_companies['price_return'].mean()
-    
-    # Get list of top K tickers
-    top_k_tickers = top_k_companies['ticker'].tolist()
-    
-    return top_k_cumulative_return, market_avg_return, top_k_tickers
-
-
-def invest_top10_per_month(df):
-    """
-    Test investment strategy using ML model predictions with time-based train/test splits.
-    
-    Iterates over months from 2024-01 to 2025-04, where each month serves as test data
-    and all previous months serve as training data.
-    
-    Returns:
-        None -- prints performance analysis for each month
-    """  
-
-    # Get feature columns from the full dataset
+    # Keep non-feature columns (cik, period, year_month, ticker, price_return, etc.)
     suffix_cols = collect_column_names_w_suffix(df.columns, FEATURE_SUFFIXES)
-    feature_cols = suffix_cols + [f for f in df.columns if '_change' in f and f not in suffix_cols]
+    non_feature_cols = [col for col in df.columns if col not in suffix_cols and '_change' not in col]
     
-    # Define the range of months to test
-    import pandas as pd
-    start_month = pd.Period(INVEST_EXP_START_MONTH_STR, freq='M')
-    end_month = pd.Period(INVEST_EXP_END_MONTH_STR, freq='M')
+    # Filter dataframe to only include non-feature columns + top K features
+    df_filtered = df[non_feature_cols + top_k_features_list].copy()
     
-    # Generate list of months to iterate over
-    current_month = start_month
-    months_to_test = []
-    while current_month <= end_month:
-        months_to_test.append(current_month)
-        current_month += 1
+    print(f"📊 Original dataframe shape: {df.shape}")
+    print(f"📊 Filtered dataframe shape: {df_filtered.shape}")
+    print(f"📊 Kept {len(non_feature_cols)} non-feature columns and {len(top_k_features_list)} top features")
     
-    print(f"\n📊 Testing investment strategy with time-based splits...")
-    print(f"📅 Testing months: {len(months_to_test)} months from {start_month} to {end_month}")
-    
-    # save the records 
-    result_returns = [] 
-    df_invest_record = pd.DataFrame(columns=['year_month', 'rank', 'ticker'])  
-    # Iterate over each month
-    for current_month in months_to_test:
-        print(f"\n" + "="*60)
-        print(f"📅 Testing performance for {current_month}")
-        
-        # Get test data (current month)
-        df_test = df[df['year_month'] == current_month].copy()
-        
-        # Get training data (all months before current month)
-        df_train = df[df['year_month'] < current_month].copy()
-        
-        print(f"📊 Training data: {len(df_train)} samples")
-        print(f"📊 Test data: {len(df_test)} samples")
-        
-        # Skip if no test data for this month
-        if len(df_test) == 0:
-            print(f"⚠️  No test data available for {current_month}, skipping...")
-            continue
-            
-        # Skip if insufficient training data
-        if len(df_train) < 100:  # Minimum threshold for training
-            print(f"⚠️  Insufficient training data ({len(df_train)} samples) for {current_month}, skipping...")
-            continue
-        
-        # Train model on df_train
-        X_train = df_train[feature_cols].copy()
-        y_train = df_train[Y_LABEL].copy()
-        model = xgb.XGBClassifier(
-                n_estimators=100, max_depth=6, learning_rate=0.1,
-                random_state=42, n_jobs=-1, eval_metric='logloss'
-            )
-        model.fit(X_train, y_train)
-        
-        # Run top_candidate_w_return on df_test
-        top10_return, avg_return, top10_tickers = top_candidate_w_return(model, df_test, feature_cols, K=10)
-        print(f"  📊 Top 10 return: {top10_return:.4f}", f"  📊 Average return: {avg_return:.4f}")
-        print(f"  📊 Top 10 tickers: {top10_tickers}")
-        top10_return_cgt_adjusted = 1+0.8*(top10_return-1) if top10_return > 1 else top10_return
-        result_returns.append([current_month, top10_return, avg_return, top10_return_cgt_adjusted])
-        
-        # Append all top tickers at once using vectorized operation
-        new_rows = pd.DataFrame({
-            'year_month': [current_month] * len(top10_tickers),
-            'rank': range(1, len(top10_tickers) + 1),
-            'ticker': top10_tickers
-        })
-        df_invest_record = pd.concat([df_invest_record, new_rows], ignore_index=True)
-
-    # print out the 
-    result_returns = pd.DataFrame(result_returns, columns=['year_month', 'top10_return', 'avg_return', 'top10_return_cgt_adjusted'])
-   
-    print(f"\n" + "="*60)
-    print("Aggregated Investment Performance:")
-    print(f"   Avg market return: {result_returns['avg_return'].mean():.4f}")
-    print(f"   Top 10 return: {result_returns['top10_return'].mean():.4f}")
-    print(f"   Top 10 return cgt adjusted: {result_returns['top10_return_cgt_adjusted'].mean():.4f}")
-    print(f"="*60)
-   
-    return df_invest_record
-
-
-def long_term_gain_from_invest_record(df_invest_record, num_months_horizon):
-    """
-    Although the model is trained on short-term (1-mo or 3-mo) up/down trends, 
-    the model may be useful for picking stocks with long-term potential.
-    This function computes the long-term gain from investment records for a specified time horizon.
-    
-    Args:
-        df_invest_record (pd.DataFrame): DataFrame with columns ['year_month', 'ticker'] 
-                                       containing investment decisions
-        num_months_horizon (int): Number of months to look ahead for return calculation
-    
-    Returns:
-        pd.DataFrame: Result from price_trend() function containing trend analysis
-    """
-    # Read month_end_price from config file
-    df_month_end = pd.read_csv(MONTH_END_PRICE_FILE)
-    
-    # Convert year_month back to Period objects (CSV loads them as strings)
-    df_month_end['year_month'] = pd.to_datetime(df_month_end['year_month']).dt.to_period('M')
-    
-    # Filter for tickers relevant to our input dataframe
-    relevant_tickers = df_invest_record['ticker'].unique()
-    df_work = df_month_end[df_month_end['ticker'].isin(relevant_tickers)].copy()
-    
-    # Run price_trend() on df_work with num_months_horizon as parameter
-    price_trend_df = price_trend(df_work, num_months_horizon)
-    
-    # Generate year_month from month_end_date
-    price_trend_df['year_month'] = pd.to_datetime(price_trend_df['month_end_date']).dt.to_period('M')
-    
-    # Filter to only include records where investment was made
-    # Join on ticker and year_month matches investment dates
-    result_df = price_trend_df.merge(
-        df_invest_record,
-        on=['ticker', 'year_month'],
-        how='inner'
-    )
-    result_df.sort_values(by=['year_month', 'rank'], ascending=True, inplace=True)
-    result_df.to_csv('invest_record_12month_gain.csv', index=False)
-    
-    # aggregate by year_month to get the average return for each month
-    result_df_agg_by_month = result_df.groupby('year_month').agg({'price_return': 'mean'}).reset_index()
-    print(result_df_agg_by_month.sort_values(by='year_month', ascending=True))
-    print('average return: ', result_df_agg_by_month['price_return'].mean())
-    result_df_agg_by_month['price_return_cgt_adjusted'] = result_df_agg_by_month['price_return'].apply(
-        lambda x: 1+0.8*(x-1) if x > 1 else x
-    )
-    print('return cgt adjusted: ', result_df_agg_by_month['price_return_cgt_adjusted'].mean())
-    
-    return result_df_agg_by_month
+    return df_filtered
 
 
 def main():
@@ -557,7 +404,6 @@ def main():
     """
     print("🚀 Starting SEC Data Analysis and ML Pipeline")
     print("=" * 60)
-    
     
     # Prepare data (you can change split_strategy to 'date' for time-based splitting)
     # Load and join data
@@ -584,29 +430,16 @@ def main():
     feature_cols = suffix_cols + [f for f in df_train.columns if '_change' in f and f not in suffix_cols]
     model_perf_records_no_augment, feature_importance_ranking_no_augment = build_baseline_model(df_train, df_val, feature_cols)
 
-    # if FEATURE_IMPORTANCE_RANKING_FLAG is True, remake the dataframe with top K features
-    if FEATURE_IMPORTANCE_RANKING_FLAG:
-        # Get top K features
-        top_k_features = feature_importance_ranking.head(TOP_K_FEATURES)['feature'].tolist()
-        # Keep non-feature columns (cik, period, year_month, ticker, price_return, etc.)
-        suffix_cols = collect_column_names_w_suffix(df.columns, FEATURE_SUFFIXES)
-        non_feature_cols = [col for col in df.columns if col not in suffix_cols and '_change' not in col]
-        df_filtered = df[non_feature_cols + top_k_features].copy()
-        print(f"📊 Original dataframe shape: {df.shape}", f"📊 Filtered dataframe shape: {df_filtered.shape}")
-        df = df_filtered 
-    
-    # test the investment performance
-    print("="*60)
-    print("Testing Investment Performance...")
-    print("="*60)
-    df_invest_record = invest_top10_per_month(df)
+    # Save feature importance ranking to file for future use
+    if feature_importance_ranking is not None:  
+        feature_importance_ranking_file = os.path.join(MODEL_DIR, 'feature_importance_ranking.csv')
+        feature_importance_ranking.to_csv(feature_importance_ranking_file, index=False)
+        print(f"💾 Saved feature importance ranking to: {feature_importance_ranking_file}")
 
-    # though the model is trained on short-term (1-mo or 3-mo) up/down trends, 
-    # the model may be useful for picking stocks with long-term potential.  
-    # calculate the long-term gain from the investment record for 12 months horizon
-    df_long_term_gain_by_month = long_term_gain_from_invest_record(df_invest_record, 
-                                                         num_months_horizon=12)  
-    
+    if feature_importance_ranking_no_augment is not None:  
+        feature_importance_ranking_no_augment_file = os.path.join(MODEL_DIR, 'feature_importance_ranking_no_augment.csv')
+        feature_importance_ranking_no_augment.to_csv(feature_importance_ranking_no_augment_file, index=False)
+        print(f"💾 Saved feature importance ranking to: {feature_importance_ranking_no_augment_file}")
 
 
 if __name__ == "__main__":
