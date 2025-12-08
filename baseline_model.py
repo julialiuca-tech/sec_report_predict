@@ -43,18 +43,18 @@ from utility_binary_classifier import baseline_binary_classifier, split_train_va
 
 TEST_CUTOFF_DATE = 20241231
 
-def collect_column_names_w_suffix(cols, suffixes):
+def collect_column_names_w_suffix(cols, feature_suffixes=['_current']):
     """
     Collect column names that end with any suffix in the suffixes list.
     
     Args:
         cols (list): List of column names to check
-        suffixes (list): List of suffixes to match against
+        feature_suffixes (list): List of suffixes to match against
         
     Returns:
         list: List of column names that end with any suffix in the suffixes list
     """
-    return [col for col in cols if any(col.endswith(suffix) for suffix in suffixes)]
+    return [col for col in cols if any(col.endswith(suffix) for suffix in feature_suffixes)]
 
 def prep_data_feature_label(featurized_data_file=FEATURIZED_ALL_QUARTERS_FILE, 
                              stock_trend_data_file=STOCK_TREND_DATA_FILE, 
@@ -330,10 +330,10 @@ def build_baseline_model(df_train, df_val, feature_cols):
             else:
                 correlation = float('nan')
             print(f"  {i:2d}. {feature_name:<30} Importance: {importance:.4f}  Correlation: {correlation:.4f}")
-        
+       
+        feature_importance_ranking = best_model_perf['feature_importance'].sort_values('importance', ascending=False)
         if FEATURE_IMPORTANCE_RANKING_FLAG: # If True, retrain model with top K features based on importance
             # Get feature importance ranking (descending order)
-            feature_importance_ranking = best_model_perf['feature_importance'].sort_values('importance', ascending=False)
             top_k_features = feature_importance_ranking.head(TOP_K_FEATURES)['feature'].tolist()
             # Filter training and validation data to only include top K features
             X_train_topk = X_train[top_k_features].copy()
@@ -349,12 +349,6 @@ def build_baseline_model(df_train, df_val, feature_cols):
             print(f"   Recall: {retrained_model_perf['recall']:.4f}")
             print(f"   ROC-AUC: {retrained_model_perf['roc_auc']:.4f}")
             print(f"   Corr_Confidence_Growth: {retrained_model_perf['corr_confidence_w_growth']:.4f}")
-        else:
-            feature_importance_ranking = None
-    else:
-        feature_importance_ranking = None
-
-    
     
     return model_perf_records, feature_importance_ranking
 
@@ -422,6 +416,11 @@ def main():
     print(f"\n" + "="*60)
     print("Building and Comparing ML Models...")
     model_perf_records, feature_importance_ranking = build_baseline_model(df_train, df_val, feature_cols)
+    # Save feature importance ranking to file for future use
+    if feature_importance_ranking is not None:  
+        feature_importance_ranking_file = os.path.join(MODEL_DIR, 'feature_importance_ranking.csv')
+        feature_importance_ranking.to_csv(feature_importance_ranking_file, index=False)
+        print(f"💾 Saved feature importance ranking to: {feature_importance_ranking_file}")
 
     # for comparison, build a model without _augment features 
     print(f"\n" + "="*60)
@@ -429,13 +428,6 @@ def main():
     suffix_cols = collect_column_names_w_suffix(df_train.columns, ['_current'])
     feature_cols = suffix_cols + [f for f in df_train.columns if '_change' in f and f not in suffix_cols]
     model_perf_records_no_augment, feature_importance_ranking_no_augment = build_baseline_model(df_train, df_val, feature_cols)
-
-    # Save feature importance ranking to file for future use
-    if feature_importance_ranking is not None:  
-        feature_importance_ranking_file = os.path.join(MODEL_DIR, 'feature_importance_ranking.csv')
-        feature_importance_ranking.to_csv(feature_importance_ranking_file, index=False)
-        print(f"💾 Saved feature importance ranking to: {feature_importance_ranking_file}")
-
     if feature_importance_ranking_no_augment is not None:  
         feature_importance_ranking_no_augment_file = os.path.join(MODEL_DIR, 'feature_importance_ranking_no_augment.csv')
         feature_importance_ranking_no_augment.to_csv(feature_importance_ranking_no_augment_file, index=False)
