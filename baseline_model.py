@@ -41,7 +41,6 @@ from feature_augment import compute_ratio_features, flag_outliers_by_hard_limits
 from featurize import enhance_tags_w_gradient
 from utility_binary_classifier import baseline_binary_classifier, split_train_val_by_column
 
-TEST_CUTOFF_DATE = 20241231
 
 def collect_column_names_w_suffix(cols, feature_suffixes=['_current']):
     """

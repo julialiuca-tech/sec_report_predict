@@ -79,8 +79,8 @@ consulted for more accurate assessments.
 import pandas as pd
 import numpy as np
 import os
-from typing import List, Tuple, Optional
-from config import SAVE_DIR, FEATURIZED_SIMPLIFIED_FILE, QUARTER_FEATURIZED_PATTERN
+from typing import Optional
+from config import FEATURIZED_SIMPLIFIED_FILE
 
 
 def _find_feature_column(df: pd.DataFrame, tag: str, qtrs: int, suffix: str = '_current') -> Optional[str]:

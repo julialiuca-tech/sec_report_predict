@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
-import seaborn as sns
 from utility_data import load_and_join_sec_xbrl_data, top_tags
 
 

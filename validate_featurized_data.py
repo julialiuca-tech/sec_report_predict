@@ -21,7 +21,6 @@ Expected result: The sum of individual quarter non_null_counts should equal the 
 
 import pandas as pd
 import os
-from pathlib import Path
 
 # Import the function from featurize.py
 from featurize import summarize_feature_completeness

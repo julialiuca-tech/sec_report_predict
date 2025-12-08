@@ -18,7 +18,6 @@ from baseline_model import (
     prep_data_feature_label,
 )
 from config import (
-    FEATURE_SUFFIXES,
     INVEST_EXP_END_MONTH_STR,
     INVEST_EXP_START_MONTH_STR,
     MODEL_DIR,
@@ -33,7 +32,7 @@ from utility_data import price_trend
 
 def top_candidate_w_return(df_companies, strategy_param):
     """
-    Compute the performance of the model on the top K companies.
+    Compute the performance of the model on top candidates (either by rank or probability)
     
     Args: 
         df_companies: The dataframe containing the companies, 
@@ -80,9 +79,9 @@ def top_candidate_w_return(df_companies, strategy_param):
 
 
 
-def invest_top_candidate_monthly_retro_performance():
+def invest_monthly_retro_performance():
     """
-    Test investment strategy using ML model predictions with time-based train/test splits.
+    Test investment strategies using ML model predictions with time-based train/test splits.
     
     Iterates over months from 2024-01 to 2025-04, where each month serves as test data
     and all previous months serve as training data.
@@ -272,4 +271,4 @@ def long_term_gain_from_invest_record(df_invest_record, num_months_horizon):
 
 
 if __name__ == "__main__":
-    invest_top_candidate_monthly_retro_performance() 
+    invest_monthly_retro_performance() 

@@ -25,7 +25,6 @@ import zipfile
 import shutil
 import re
 from pathlib import Path
-from typing import Dict, List, Tuple
 from utility_data import get_cik_ticker_mapping, price_trend
 from utility_data import remove_cik_w_missing_month, filter_by_date_continuity, filter_by_date_range, filter_by_price_range
 from config import DATA_DIR
