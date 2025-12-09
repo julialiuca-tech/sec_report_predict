@@ -210,6 +210,7 @@ def invest_monthly_retro_performance():
             invest_record = strategy_outcome[strategy_name]['monthly_invest_record'].copy()
             invest_record = augment_invest_record_w_long_term_return(invest_record)   
             print(f"📊 Strategy: {strategy_name}", 
+                f" {len(invest_record)} selected", 
                 f"Short-term return: {invest_record['price_return'].mean():.4f}", 
                 f"Long-term return: {invest_record['price_return_long_term'].mean():.4f}"
             ) 
