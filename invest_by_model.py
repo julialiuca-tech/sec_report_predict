@@ -30,52 +30,49 @@ from utility_data import price_trend
 
 
 
-def top_candidate_w_return(df_companies, strategy_param):
+def top_candidate_w_return(df_companies, strategy_param, year_month):
     """
-    Compute the performance of the model on top candidates (either by rank or probability)
+    Filter top candidates based on strategy and return DataFrame with selected companies.
     
     Args: 
         df_companies: The dataframe containing the companies, 
            must contain columns: ['ticker', 'price_return', 'y_pred_proba']
-        strategy_param (int):  strategy for selecting top candidates
+        strategy_param (dict): Strategy for selecting top candidates with 'name' and 'param'
+        year_month: Period or string representing the year-month
         
     Returns:
-        tuple: (top_k_cumulative_return, market_avg_return, top_k_tickers)
-            - top_k_cumulative_return: Cumulative average return from top K candidates
-            - market_avg_return: Average return of the market (all companies)
-            - top_k_tickers: List of top K candidates' tickers
+        pd.DataFrame: DataFrame with columns ['year_month', 'ticker', 'y_pred_proba', 'rank', 'price_return']
+            Contains only the companies that meet the strategy criteria, sorted by y_pred_proba descending.
+            Returns empty DataFrame if no companies meet the criteria.
     """
-    df_companies.sort_values(by= 'y_pred_proba', ascending=False, inplace=True)
-
-    # Get market average return (all companies), used for benchmark comparison
-    market_avg_return = df_companies['price_return'].mean()
-
-    # Calculate cumulative average of invest_val as we slide down the sorted dataframe
-    df_companies['cumulative_avg_return'] = df_companies['price_return'].expanding().mean()
-    df_companies['cumulative_count'] = range(1, len(df_companies) + 1)
+    if len(df_companies) == 0:
+        return pd.DataFrame(columns=['year_month', 'ticker', 'y_pred_proba', 'rank', 'price_return'])
     
+    # Sort by prediction probability descending
+    df_sorted = df_companies.sort_values(by='y_pred_proba', ascending=False).copy()
+    
+    # Determine threshold based on strategy
     if strategy_param['name'] == 'top_k':
         K = strategy_param['param']
-        # Get the cumulative return for top K candidates
-        if len(df_companies) >= K:
-            top_candidate_cumulative_return = df_companies.iloc[K-1]['cumulative_avg_return']
-            top_candidate_tickers = df_companies.iloc[:K]['ticker'].tolist()
-        else:
-            top_candidate_cumulative_return = df_companies['cumulative_avg_return'].iloc[-1]
-            top_candidate_tickers = df_companies['ticker'].tolist()
-    elif strategy_param['name'] == 'top_proba': 
+        effective_k = min(K, len(df_sorted))
+        threshold = df_sorted.iloc[effective_k - 1]['y_pred_proba']
+    elif strategy_param['name'] == 'top_proba':
         threshold = strategy_param['param']
-        top_candidate_companies = df_companies[df_companies['y_pred_proba'] >= threshold]
-        if len(top_candidate_companies) == 0:
-            top_candidate_cumulative_return = np.nan
-            top_candidate_tickers = []
-        else:
-            top_candidate_cumulative_return = top_candidate_companies['cumulative_avg_return'].iloc[-1]
-            top_candidate_tickers = top_candidate_companies['ticker'].tolist()
     else:
         raise ValueError(f"Invalid strategy: {strategy_param['name']}")
- 
-    return top_candidate_cumulative_return, market_avg_return, top_candidate_tickers
+    
+    # Filter companies above threshold
+    top_candidates = df_sorted[df_sorted['y_pred_proba'] >= threshold].copy()
+    
+    if len(top_candidates) == 0:
+        return pd.DataFrame(columns=['year_month', 'ticker', 'y_pred_proba', 'rank', 'price_return'])
+    
+    # Add rank (1, 2, 3, ... based on y_pred_proba order, already sorted descending)
+    top_candidates['rank'] = range(1, len(top_candidates) + 1)
+    top_candidates['year_month'] = year_month
+    result_df = top_candidates[['year_month', 'ticker', 'y_pred_proba', 'rank', 'price_return']].copy()
+    
+    return result_df
 
 
 
@@ -122,7 +119,6 @@ def invest_monthly_retro_performance():
     strategy_outcome = {}
     for strategy_name in strategies:
         strategy_outcome[strategy_name] = {
-            'result_returns': pd.DataFrame(columns=['year_month', 'top_candidate_return', 'avg_return', 'top_candidate_return_cgt_adjusted']),
             'monthly_invest_record': pd.DataFrame(columns=['year_month', 'rank', 'ticker'])
         }
     
@@ -134,8 +130,7 @@ def invest_monthly_retro_performance():
         # train/test split
         df_test = df[df['year_month'] == current_month].copy()
         df_train = df[df['year_month'] < current_month].copy()
-        print(f"📊 Training data: {len(df_train)} samples")
-        print(f"📊 Test data: {len(df_test)} samples")
+        print(f"📊 Training data: {len(df_train)} samples", f"📊 Test data: {len(df_test)} samples")
         
         # Skip if no test data for this month
         if len(df_test) == 0:
@@ -158,67 +153,47 @@ def invest_monthly_retro_performance():
         # Run top_candidate_w_return on df_test
         X_test = df_test[feature_cols].copy()  
         y_pred_proba = model.predict_proba(X_test)[:, 1]
-        df_test['y_pred_proba']= y_pred_proba
+        df_test['y_pred_proba'] = y_pred_proba
+        
+        # Get market average return for this month
+        avg_return = df_test['price_return'].mean()
 
         for strategy_name in strategies:
             param = {'name': strategy_name, 'param': strategies[strategy_name]['param']}
-            top_candidate_return, avg_return, top_candidate_tickers = top_candidate_w_return(df_test, param)
-            if len(top_candidate_tickers) > 0 and not pd.isna(top_candidate_return):
-                top_candidate_return_cgt_adjusted = 1+0.8*(top_candidate_return-1) if top_candidate_return > 1 else top_candidate_return
-                current_month_returns = pd.DataFrame({
-                    'year_month': [current_month],
-                    'top_candidate_return': [top_candidate_return],
-                    'avg_return': [avg_return],
-                    'top_candidate_return_cgt_adjusted': [top_candidate_return_cgt_adjusted]
-                })
-                 
-                monthly_invest_record_rows = pd.DataFrame({
-                    'year_month': [current_month] * len(top_candidate_tickers),
-                    'rank': range(1, len(top_candidate_tickers) + 1),
-                    'ticker': top_candidate_tickers
-                })
-
-                # save data to strategy_outcome
-                strategy_outcome[strategy_name]['result_returns'] = pd.concat(  
-                    [strategy_outcome[strategy_name]['result_returns'], current_month_returns], 
-                    ignore_index=True
-                )
+            df_top_candidates = top_candidate_w_return(df_test, param, current_month)
+            
+            if len(df_top_candidates) > 0:
                 strategy_outcome[strategy_name]['monthly_invest_record'] = pd.concat(
-                    [strategy_outcome[strategy_name]['monthly_invest_record'], monthly_invest_record_rows], 
+                    [strategy_outcome[strategy_name]['monthly_invest_record'], df_top_candidates], 
                     ignore_index=True
                 )
-            # print trace 
-            return_str = f"{top_candidate_return:.4f}" if not pd.isna(top_candidate_return) else "NaN"
-            ticker_str = ','.join(top_candidate_tickers) if len(top_candidate_tickers) > 0 else "None"
-            print(f"  📊 Strategy: {strategy_name}, Top candidate return: {return_str}", 
-                  f" Average return: {avg_return:.4f}", 
-                  f" Top candidate tickers: {len(top_candidate_tickers)}: {ticker_str}")
 
+                # print out the results for the current month
+                top_candidate_return = df_top_candidates['price_return'].mean()
+                num_tickers = len(df_top_candidates)
+                ticker_str = ','.join(df_top_candidates['ticker'].tolist())
+                print(f"  📊 Strategy: {strategy_name}", f"Average return (market): {avg_return:.4f}")
+                print(f"     Selected tickers ({num_tickers}): {ticker_str}", 
+                      f"return from selected: {top_candidate_return:.4f}")
+            else:
+                print(f"  📊 Strategy: {strategy_name}, No candidates selected")
+    
+ 
+    print(f"\n" + "="*30 + "Overall summary" + "="*30)
     # print out the results
     for strategy_name in strategies:
-        result_returns = strategy_outcome[strategy_name]['result_returns']
-        result_returns.to_csv(os.path.join(MODEL_DIR, "returns_" + strategy_name + ".csv"), index=False)
-        # print out the results
-        print(f"\n" + "="*60)
-        print(f"📊 Strategy: {strategy_name}")
-        print(f"Monthly invest record shape: {strategy_outcome[strategy_name]['monthly_invest_record'].shape}")
-        strategy_outcome[strategy_name]['monthly_invest_record'].to_csv(
-            os.path.join(MODEL_DIR, "invest_record_" + strategy_name + ".csv"), 
-            index=False
-        )
-   
-        # though the model is trained on short-term (1-mo or 3-mo) up/down trends, 
-        # the model may be useful for picking stocks with long-term potential.  
-        # calculate the long-term gain from the investment record for 12 months horizon
-        if len(strategy_outcome[strategy_name]['monthly_invest_record']) > 0:
-            df_long_term_gain_by_month = long_term_gain_from_invest_record(
-                strategy_outcome[strategy_name]['monthly_invest_record'], 
-                num_months_horizon=12
-            )  
-
+        if len(strategy_outcome[strategy_name]['monthly_invest_record']) == 0:
+            print(f"📊 Strategy: {strategy_name}, No investment record")
+        else:
+            invest_record = strategy_outcome[strategy_name]['monthly_invest_record'].copy()
+            invest_record = augment_invest_record_w_long_term_return(invest_record, num_months_horizon=12)   
+            print(f"📊 Strategy: {strategy_name}", 
+                f"Short-term return: {invest_record['price_return'].mean():.4f}", 
+                f"Long-term return: {invest_record['price_return_long_term'].mean():.4f}"
+            ) 
  
 
-def long_term_gain_from_invest_record(df_invest_record, num_months_horizon):
+def augment_invest_record_w_long_term_return(df_invest_record, num_months_horizon):
     """
     Although the model is trained on short-term (1-mo or 3-mo) up/down trends, 
     the model may be useful for picking stocks with long-term potential.
@@ -240,13 +215,10 @@ def long_term_gain_from_invest_record(df_invest_record, num_months_horizon):
     
     # Filter for tickers relevant to our input dataframe
     relevant_tickers = df_invest_record['ticker'].unique()
-    df_work = df_month_end[df_month_end['ticker'].isin(relevant_tickers)].copy()
-    
-    # Run price_trend() on df_work with num_months_horizon as parameter
-    price_trend_df = price_trend(df_work, num_months_horizon)
-    
-    # Generate year_month from month_end_date
+    df_work = df_month_end[df_month_end['ticker'].isin(relevant_tickers)].copy() 
+    price_trend_df = price_trend(df_work, num_months_horizon) 
     price_trend_df['year_month'] = pd.to_datetime(price_trend_df['month_end_date']).dt.to_period('M')
+    price_trend_df.rename(columns={'price_return': 'price_return_long_term'}, inplace=True)
     
     # Filter to only include records where investment was made
     # Join on ticker and year_month matches investment dates
@@ -254,20 +226,10 @@ def long_term_gain_from_invest_record(df_invest_record, num_months_horizon):
         df_invest_record,
         on=['ticker', 'year_month'],
         how='inner'
-    )
-    result_df.sort_values(by=['year_month', 'rank'], ascending=True, inplace=True)
-    result_df.to_csv('invest_record_12month_gain.csv', index=False)
+    ) 
+
+    return result_df 
     
-    # aggregate by year_month to get the average return for each month
-    result_df_agg_by_month = result_df.groupby('year_month').agg({'price_return': 'mean'}).reset_index()
-    print(result_df_agg_by_month.sort_values(by='year_month', ascending=True))
-    print('average return: ', result_df_agg_by_month['price_return'].mean())
-    result_df_agg_by_month['price_return_cgt_adjusted'] = result_df_agg_by_month['price_return'].apply(
-        lambda x: 1+0.8*(x-1) if x > 1 else x
-    )
-    print('return cgt adjusted: ', result_df_agg_by_month['price_return_cgt_adjusted'].mean())
-    
-    return result_df_agg_by_month
 
 
 if __name__ == "__main__":
