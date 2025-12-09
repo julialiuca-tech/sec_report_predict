@@ -27,9 +27,6 @@ DATA_BASE_DIR = os.path.join(DATA_DIR, 'SEC_raw_2015_to_2025')
 STOCK_DIR = os.path.join(DATA_DIR, 'stock_Stooq_daily_US', 'derived_data')
 
 # model related data
-MODEL_DIR = os.path.join(DATA_DIR, 'model_related')
-
-# model related data 
 MODEL_DIR = os.path.join(DATA_DIR, 'model_related') 
 
 # =============================================================================
@@ -60,7 +57,6 @@ DEFAULT_N_QUARTERS_HISTORY_COMP = 0  # 0 means no history comparisons, 4 for pas
 
 TREND_HORIZON_IN_MONTHS= 3
 STOCK_TREND_DATA_FILE = os.path.join(STOCK_DIR, f'price_trends_{TREND_HORIZON_IN_MONTHS}month.csv')
-MONTH_END_PRICE_FILE = os.path.join(STOCK_DIR, 'month_end_price_stooq.csv')
 
 # parameters for feature augmentation  
 
@@ -81,8 +77,7 @@ COMPLETENESS_THRESHOLD = 0.2
 Y_LABEL = 'trend_up_or_down'  # can be 'trend_up_or_down' or 'trend_5per_up'
 SPLIT_STRATEGY = {'cik':'random'} 
 SPLIT_STRATEGY = None
-INVEST_EXP_START_MONTH_STR = '2020-01'
-INVEST_EXP_END_MONTH_STR = '2025-04'
+ 
 
 # =============================================================================
 # VALIDATION AND DEBUGGING
@@ -92,7 +87,7 @@ def validate_config():
     """
     Validate that all required directories exist and create them if needed.
     """
-    directories_to_check = [DATA_DIR, SAVE_DIR, DATA_BASE_DIR, STOCK_DIR]
+    directories_to_check = [DATA_DIR, SAVE_DIR, DATA_BASE_DIR, STOCK_DIR, MODEL_DIR]
     
     for directory in directories_to_check:
         if not os.path.exists(directory):

@@ -692,25 +692,31 @@ if __name__ == "__main__":
         print("\n❌ No stock data loaded. Exiting.")
         exit(1)
     
-    # remove records with date outside of 2000-01-01 to 2025-11-01
-    df_combined = filter_by_date_range(df_combined, 'date', start_date='2000-01-01', end_date='2025-11-01')
+    if not os.path.exists(month_end_price_file):
+        # remove records with date outside of 2000-01-01 to 2025-11-01
+        df_combined = filter_by_date_range(df_combined, 'date', start_date='2000-01-01', end_date='2025-11-01')
 
-    # # remove records with large gaps in date
-    # df_combined, removed_ticker_info = filter_by_date_continuity(df_combined, 'date', gap_in_days=7)
-    # print('debugging trace: removed tickers with max gap > 7 days:', removed_ticker_info[:5])
+        # # remove records with large gaps in date
+        # df_combined, removed_ticker_info = filter_by_date_continuity(df_combined, 'date', gap_in_days=7)
+        # print('debugging trace: removed tickers with max gap > 7 days:', removed_ticker_info[:5])
 
-    month_end_df = month_end_price_stooq(df_combined)
+        month_end_df = month_end_price_stooq(df_combined)
 
-    # Apply filters before saving
-    month_end_df = remove_cik_w_missing_month(month_end_df)
-    month_end_df = filter_by_price_range(month_end_df, 'close_price', min_price=1, max_price=1000)
-    
-    # Save the filtered month-end price data
-    month_end_df.to_csv(month_end_price_file, index=False)
-    print(f"\n💾 Month-end prices saved to: {month_end_price_file}")
+        # Apply filters before saving
+        month_end_df = remove_cik_w_missing_month(month_end_df)
+        month_end_df = filter_by_price_range(month_end_df, 'close_price', min_price=1, max_price=1000)
+        
+        # Save the filtered month-end price data
+        month_end_df.to_csv(month_end_price_file, index=False)
+        month_end_df['year_month'] = month_end_df['year_month'].apply(lambda x: pd.to_datetime(x).to_period('M'))
+        print(f"\n💾 Month-end prices saved to: {month_end_price_file}")
+    else:
+        month_end_df = pd.read_csv(month_end_price_file)
+        # Convert year_month back to Period object (CSV loads it as string)
+        month_end_df['year_month'] = pd.to_datetime(month_end_df['year_month']).dt.to_period('M')
 
     # Calculate trends
-    for horizon in [3, 1]:
+    for horizon in [12, 3, 1]:
         trend_df = price_trend(month_end_df, trend_horizon_in_months=horizon)
         if len(trend_df) > 0: 
             # Save results to CSV

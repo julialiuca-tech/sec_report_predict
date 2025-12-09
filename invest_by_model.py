@@ -18,59 +18,70 @@ from baseline_model import (
     prep_data_feature_label,
 )
 from config import (
-    INVEST_EXP_END_MONTH_STR,
-    INVEST_EXP_START_MONTH_STR,
     MODEL_DIR,
-    MONTH_END_PRICE_FILE,
     QUARTER_GRADIENTS,
     Y_LABEL,
     FEATURE_IMPORTANCE_RANKING_FLAG,
+    STOCK_DIR,
 )
-from utility_data import price_trend
+
+# =============================================================================
+# INVESTMENT EXPERIMENT CONFIGURATION
+# =============================================================================
+INVEST_EXP_START_MONTH_STR = '2020-01'
+INVEST_EXP_END_MONTH_STR = '2025-04' 
+LONG_TERM_TRENDS_FILE = os.path.join(STOCK_DIR, 'price_trends_12month.csv')
 
 
 
-def top_candidate_w_return(df_companies, strategy_param, year_month):
+def top_candidate_w_return(df_companies, strategy):
     """
     Filter top candidates based on strategy and return DataFrame with selected companies.
     
     Args: 
         df_companies: The dataframe containing the companies, 
-           must contain columns: ['ticker', 'price_return', 'y_pred_proba']
-        strategy_param (dict): Strategy for selecting top candidates with 'name' and 'param'
-        year_month: Period or string representing the year-month
+           must contain columns: ['year_month', 'cik', 'ticker', 'price_return', 'y_pred_proba']
+        strategy (dict): Strategy for selecting top candidates with 'method' and 'param'
         
     Returns:
-        pd.DataFrame: DataFrame with columns ['year_month', 'ticker', 'y_pred_proba', 'rank', 'price_return']
+        pd.DataFrame: DataFrame with columns ['year_month', 'cik', 'ticker', 'y_pred_proba', 'rank', 'price_return']
             Contains only the companies that meet the strategy criteria, sorted by y_pred_proba descending.
             Returns empty DataFrame if no companies meet the criteria.
     """
     if len(df_companies) == 0:
-        return pd.DataFrame(columns=['year_month', 'ticker', 'y_pred_proba', 'rank', 'price_return'])
+        # Return empty DataFrame with expected columns
+        return pd.DataFrame(columns=['year_month', 'cik', 'ticker', 'y_pred_proba', 'rank', 'price_return'])
+    
+    # Assert that all year_month values are the same
+    unique_year_months = df_companies['year_month'].unique()
+    assert len(unique_year_months) == 1, \
+        f"All rows in df_companies must have the same year_month. Found {len(unique_year_months)} different values: {unique_year_months}"
     
     # Sort by prediction probability descending
     df_sorted = df_companies.sort_values(by='y_pred_proba', ascending=False).copy()
     
     # Determine threshold based on strategy
-    if strategy_param['name'] == 'top_k':
-        K = strategy_param['param']
+    if strategy['method'] == 'top_k':
+        K = strategy['param']
         effective_k = min(K, len(df_sorted))
         threshold = df_sorted.iloc[effective_k - 1]['y_pred_proba']
-    elif strategy_param['name'] == 'top_proba':
-        threshold = strategy_param['param']
+    elif strategy['method'] == 'top_proba':
+        threshold = strategy['param']
     else:
-        raise ValueError(f"Invalid strategy: {strategy_param['name']}")
+        raise ValueError(f"Invalid strategy: {strategy}")
     
     # Filter companies above threshold
     top_candidates = df_sorted[df_sorted['y_pred_proba'] >= threshold].copy()
     
     if len(top_candidates) == 0:
-        return pd.DataFrame(columns=['year_month', 'ticker', 'y_pred_proba', 'rank', 'price_return'])
+        # Return empty DataFrame with expected columns
+        return pd.DataFrame(columns=['year_month', 'cik', 'ticker', 'y_pred_proba', 'rank', 'price_return'])
     
     # Add rank (1, 2, 3, ... based on y_pred_proba order, already sorted descending)
     top_candidates['rank'] = range(1, len(top_candidates) + 1)
-    top_candidates['year_month'] = year_month
-    result_df = top_candidates[['year_month', 'ticker', 'y_pred_proba', 'rank', 'price_return']].copy()
+    
+    # Select columns (year_month and cik are always present since df_companies comes from prep_data_feature_label)
+    result_df = top_candidates[['year_month', 'cik', 'ticker', 'y_pred_proba', 'rank', 'price_return']].copy()
     
     return result_df
 
@@ -87,9 +98,12 @@ def invest_monthly_retro_performance():
         pd.DataFrame: Investment record with columns ['year_month', 'rank', 'ticker']
     """   
 
-    strategies = {}
-    strategies['top_k'] = {'param': 10}
-    strategies['top_proba'] = {'param': 0.8} 
+    strategies = {
+        'top_5': {'method': 'top_k', 'param': 5},
+        'top_10': {'method': 'top_k', 'param': 10},
+        'proba_0.8': {'method': 'top_proba', 'param': 0.8},
+        'proba_0.85': {'method': 'top_proba', 'param': 0.85}
+    } 
 
     # Define the range of months to test
     start_month = pd.Period(INVEST_EXP_START_MONTH_STR, freq='M')
@@ -119,7 +133,7 @@ def invest_monthly_retro_performance():
     strategy_outcome = {}
     for strategy_name in strategies:
         strategy_outcome[strategy_name] = {
-            'monthly_invest_record': pd.DataFrame(columns=['year_month', 'rank', 'ticker'])
+            'monthly_invest_record': []  # Use list to collect DataFrames, concatenate later
         }
     
     # Iterate over each month
@@ -158,15 +172,11 @@ def invest_monthly_retro_performance():
         # Get market average return for this month
         avg_return = df_test['price_return'].mean()
 
-        for strategy_name in strategies:
-            param = {'name': strategy_name, 'param': strategies[strategy_name]['param']}
-            df_top_candidates = top_candidate_w_return(df_test, param, current_month)
+        for strategy_name, strategy in strategies.items(): 
+            df_top_candidates = top_candidate_w_return(df_test, strategy)
             
             if len(df_top_candidates) > 0:
-                strategy_outcome[strategy_name]['monthly_invest_record'] = pd.concat(
-                    [strategy_outcome[strategy_name]['monthly_invest_record'], df_top_candidates], 
-                    ignore_index=True
-                )
+                strategy_outcome[strategy_name]['monthly_invest_record'].append(df_top_candidates)
 
                 # print out the results for the current month
                 top_candidate_return = df_top_candidates['price_return'].mean()
@@ -179,6 +189,18 @@ def invest_monthly_retro_performance():
                 print(f"  📊 Strategy: {strategy_name}, No candidates selected")
     
  
+    # Convert lists of DataFrames to single DataFrames
+    for strategy_name in strategies:
+        monthly_records_list = strategy_outcome[strategy_name]['monthly_invest_record']
+        if len(monthly_records_list) > 0:
+            strategy_outcome[strategy_name]['monthly_invest_record'] = pd.concat(
+                monthly_records_list, ignore_index=True
+            )
+        else:
+            strategy_outcome[strategy_name]['monthly_invest_record'] = pd.DataFrame(
+                columns=['year_month', 'cik', 'ticker', 'y_pred_proba', 'rank', 'price_return']
+            )
+    
     print(f"\n" + "="*30 + "Overall summary" + "="*30)
     # print out the results
     for strategy_name in strategies:
@@ -186,47 +208,43 @@ def invest_monthly_retro_performance():
             print(f"📊 Strategy: {strategy_name}, No investment record")
         else:
             invest_record = strategy_outcome[strategy_name]['monthly_invest_record'].copy()
-            invest_record = augment_invest_record_w_long_term_return(invest_record, num_months_horizon=12)   
+            invest_record = augment_invest_record_w_long_term_return(invest_record)   
             print(f"📊 Strategy: {strategy_name}", 
                 f"Short-term return: {invest_record['price_return'].mean():.4f}", 
                 f"Long-term return: {invest_record['price_return_long_term'].mean():.4f}"
             ) 
  
 
-def augment_invest_record_w_long_term_return(df_invest_record, num_months_horizon):
+def augment_invest_record_w_long_term_return(df_invest_record):
     """
-    Although the model is trained on short-term (1-mo or 3-mo) up/down trends, 
-    the model may be useful for picking stocks with long-term potential.
-    This function computes the long-term gain from investment records for a specified time horizon.
+    Augment investment records with pre-computed long-term returns.
+    
+    This function joins investment records with pre-computed long-term price trends
+    from LONG_TERM_TRENDS_FILE to get long-term returns.
     
     Args:
-        df_invest_record (pd.DataFrame): DataFrame with columns ['year_month', 'ticker'] 
+        df_invest_record (pd.DataFrame): DataFrame with columns ['year_month', 'cik', 'ticker', ...] 
                                        containing investment decisions
-        num_months_horizon (int): Number of months to look ahead for return calculation
     
     Returns:
-        pd.DataFrame: Result from price_trend() function containing trend analysis
+        pd.DataFrame: Investment records augmented with price_return_long_term column
     """
-    # Read month_end_price from config file
-    df_month_end = pd.read_csv(MONTH_END_PRICE_FILE)
-    
-    # Convert year_month back to Period objects (CSV loads them as strings)
-    df_month_end['year_month'] = pd.to_datetime(df_month_end['year_month']).dt.to_period('M')
-    
-    # Filter for tickers relevant to our input dataframe
-    relevant_tickers = df_invest_record['ticker'].unique()
-    df_work = df_month_end[df_month_end['ticker'].isin(relevant_tickers)].copy() 
-    price_trend_df = price_trend(df_work, num_months_horizon) 
+    # Read pre-computed long-term trends from CSV
+    price_trend_df = pd.read_csv(LONG_TERM_TRENDS_FILE)
     price_trend_df['year_month'] = pd.to_datetime(price_trend_df['month_end_date']).dt.to_period('M')
     price_trend_df.rename(columns={'price_return': 'price_return_long_term'}, inplace=True)
     
-    # Filter to only include records where investment was made
-    # Join on ticker and year_month matches investment dates
+    # Convert df_invest_record year_month to Period if it's not already
+    if df_invest_record['year_month'].dtype == 'object':
+        df_invest_record = df_invest_record.copy()
+        df_invest_record['year_month'] = pd.to_datetime(df_invest_record['year_month']).dt.to_period('M')
+    
+    # Join on (cik, year_month)
     result_df = price_trend_df.merge(
         df_invest_record,
-        on=['ticker', 'year_month'],
+        on=['cik', 'year_month'],
         how='inner'
-    ) 
+    )
 
     return result_df 
     
