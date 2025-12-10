@@ -716,7 +716,7 @@ if __name__ == "__main__":
         month_end_df['year_month'] = pd.to_datetime(month_end_df['year_month']).dt.to_period('M')
 
     # Calculate trends
-    for horizon in [12, 3, 1]:
+    for horizon in [12, 6, 3, 1]:
         trend_df = price_trend(month_end_df, trend_horizon_in_months=horizon)
         if len(trend_df) > 0: 
             # Save results to CSV

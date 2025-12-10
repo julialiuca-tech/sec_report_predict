@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+import re
 
 from utility_data import load_and_join_sec_xbrl_data, print_featurization, read_tags_to_featurize, get_cik_ticker_mapping
 from config import (
@@ -666,6 +667,7 @@ def featurize_multi_qtrs(data_directories,
                          df_tags_to_featurize, 
                          N_qtrs_history_comp, 
                          save_dir=SAVE_DIR, 
+                         save_file_name=FEATURIZED_ALL_QUARTERS_FILE,
                          debug_print=DEFAULT_DEBUG_FLAG):
     """
     Top-level function to featurize multiple quarters of SEC data.
@@ -694,41 +696,42 @@ def featurize_multi_qtrs(data_directories,
                     df_featurized_quarter.set_index(['cik', 'period', 'data_qtr'])
                 ).reset_index()
 
-    completeness_stats = summarize_feature_completeness(df_featurized_all_quarters)
-    completeness_stats.to_csv(os.path.join(save_dir, FEATURE_COMPLETENESS_RANKING_FILE), index=False)
+    df_featurized_all_quarters.to_csv(os.path.join(save_dir, save_file_name), index=False)
+    
+    return df_featurized_all_quarters
 
-    df_featurized_all_quarters.to_csv(os.path.join(save_dir, FEATURIZED_ALL_QUARTERS_FILE), index=False)
 
-
-def filter_featured_data_by_completeness(processed_data_dir=SAVE_DIR, min_completeness=DEFAULT_MIN_COMPLETENESS):
+def filter_featured_data_by_completeness(
+            featurized_file = FEATURIZED_ALL_QUARTERS_FILE, 
+            completeness_file = FEATURE_COMPLETENESS_RANKING_FILE, 
+            min_completeness=DEFAULT_MIN_COMPLETENESS,
+            processed_data_dir=SAVE_DIR):
     """
     Filter featurized data by feature completeness threshold and remove duplicates.
     
-    This function filters the featurized data to keep only features that meet a minimum
-    completeness threshold. It also performs additional data cleaning steps:
-    
-    1. Reads the featurized_all_quarters.csv file
-    2. Filters out CIKs that don't map to ticker symbols (for stock price data availability)
-    3. Reads the feature_completeness_ranking.csv file
-    4. Keeps only columns (features) that are more than min_completeness% populated
-    5. For duplicate (cik, period) combinations, retains only the most recent record (max data_qtr)
-    6. Saves the filtered data to featurized_simplified.csv
-    
     Args:
-        processed_data_dir (str): Directory containing the processed data files
+        featurized_file (str): Filename or full path of the featurized data file (default: from config)
+        completeness_file (str): Filename or full path of the feature completeness ranking file (default: from config)
         min_completeness (float): Minimum completeness percentage to keep features (default: 15.0)
                                   Features below this threshold will be excluded.
+        processed_data_dir (str): Directory containing the processed data files (default: SAVE_DIR)
+                                  Only used if featurized_file and completeness_file are filenames (not full paths)
         
     Returns:
         pd.DataFrame: Filtered featurized data with only well-populated features (above threshold)
                       and no duplicate records
     """
     # Step 1: Read the featurized_all_quarters.csv file
-    featurized_file = os.path.join(processed_data_dir, FEATURIZED_ALL_QUARTERS_FILE)
-    if not os.path.exists(featurized_file):
-        raise FileNotFoundError(f"Featurized data file not found: {featurized_file}")
+    # Handle both full paths and filenames
+    if os.path.isabs(featurized_file):
+        featurized_file_path = featurized_file
+    else:
+        featurized_file_path = os.path.join(processed_data_dir, featurized_file)
     
-    df_featurized = pd.read_csv(featurized_file, low_memory=False)
+    if not os.path.exists(featurized_file_path):
+        raise FileNotFoundError(f"Featurized data file not found: {featurized_file_path}")
+    
+    df_featurized = pd.read_csv(featurized_file_path, low_memory=False)
     print(f"📊 Input data shape: {df_featurized.shape}")
     
     # Step 2: Filter out CIKs that don't map to tickers
@@ -751,11 +754,16 @@ def filter_featured_data_by_completeness(processed_data_dir=SAVE_DIR, min_comple
         print("⚠️  Warning: Could not load CIK->ticker mapping. Keeping all CIKs.")
     
     # Step 3: Read the feature_completeness_ranking.csv file
-    ranking_file = os.path.join(processed_data_dir, FEATURE_COMPLETENESS_RANKING_FILE)
-    if not os.path.exists(ranking_file):
-        raise FileNotFoundError(f"Feature completeness ranking file not found: {ranking_file}")
+    # Handle both full paths and filenames
+    if os.path.isabs(completeness_file):
+        completeness_file_path = completeness_file
+    else:
+        completeness_file_path = os.path.join(processed_data_dir, completeness_file)
     
-    df_ranking = pd.read_csv(ranking_file)
+    if not os.path.exists(completeness_file_path):
+        raise FileNotFoundError(f"Feature completeness ranking file not found: {completeness_file_path}")
+    
+    df_ranking = pd.read_csv(completeness_file_path)
     
     # Step 4: Keep only columns that are more than min_completeness% populated
     well_populated_features = df_ranking[df_ranking['non_null_percentage'] > min_completeness]['feature'].tolist()
@@ -783,14 +791,17 @@ def filter_featured_data_by_completeness(processed_data_dir=SAVE_DIR, min_comple
     print(f"📊 Output data shape: {df_simplified.shape}")
     
     # Step 6: Write the filtered dataframe to CSV file
-    simplified_file = os.path.join(processed_data_dir, FEATURIZED_SIMPLIFIED_FILE)
-    df_simplified.to_csv(simplified_file, index=False)
-    print(f"💾 Filtered data saved to: {simplified_file}")
+    # Generate simplified filename from the input filename
+    base_name = os.path.basename(featurized_file_path)
+    simplified_file_name = base_name.replace('.csv', '_simplified.csv')
+    simplified_file_path = os.path.join(os.path.dirname(featurized_file_path), simplified_file_name)
+    df_simplified.to_csv(simplified_file_path, index=False)
+    print(f"💾 Filtered data saved to: {simplified_file_path}")
     
     return df_simplified
 
 
-def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp, suffixes_to_enhance=None):
+def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp, suffixes_to_enhance=['_current']):
     """
     Enhance featurized data with gradient features by computing relative changes
     from previous quarters.
@@ -810,10 +821,7 @@ def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp, suffixes_to_enh
     
     Returns:
         pd.DataFrame: Enhanced dataframe with gradient features (df_work_w_gradient)
-    """
-    # Set default suffix if not provided (backward compatibility)
-    if suffixes_to_enhance is None:
-        suffixes_to_enhance = ['_current']
+    """ 
     
     print("🔄 Enhancing features with gradient information...")
     print("=" * 60)
@@ -974,10 +982,12 @@ def featurize_all_sec_quarters():
     quarter_directories = []
     
     if os.path.exists(DATA_BASE_DIR):
-        # Get all subdirectories in data/ that look like quarters (e.g., 2022q1, 2022q2, etc.)
+        # Get all subdirectories that match the pattern: YYYYqQ (e.g., 2022q1, 2022q2, 2023Q3)
+        # Pattern: starts with 4 digits (year), followed by 'q' or 'Q', followed by quarter number 1-4
+        quarter_pattern = re.compile(r'^[0-9]{4}[qQ][1-4]$')
         for item in os.listdir(DATA_BASE_DIR):
             item_path = os.path.join(DATA_BASE_DIR, item)
-            if os.path.isdir(item_path) and ('q' in item.lower() or 'quarter' in item.lower()):
+            if os.path.isdir(item_path) and quarter_pattern.match(item):
                 quarter_directories.append(item_path)
     
     # Sort directories to ensure consistent processing order
@@ -997,18 +1007,46 @@ def featurize_all_sec_quarters():
             os.remove(combined_file)
             print(f"✅ Deleted {combined_file}")
         
+        # Check if all individual quarter files exist
+        missing_quarter_files = []
+        for data_directory in quarter_directories:
+            quarter_name = data_directory.split('/')[-1]
+            # QUARTER_FEATURIZED_PATTERN already includes SAVE_DIR, so use it directly
+            quarter_file = QUARTER_FEATURIZED_PATTERN.format(quarter_name)
+            if not os.path.exists(quarter_file):
+                missing_quarter_files.append(quarter_name)
+        
+        # If any quarter files are missing, we need to run featurization
+        # This also means the combined file is out of date and should be deleted
+        if missing_quarter_files:
+            print(f"⚠️  Missing individual quarter featurized files: {missing_quarter_files}")
+            if os.path.exists(combined_file):
+                print(f"🗑️  Deleting outdated combined featurized file: {combined_file}")
+                os.remove(combined_file)
+                print(f"✅ Deleted {combined_file}")
+        
         if os.path.exists(combined_file):
             print(f"✅ Combined featurized file already exists: {combined_file}")
             print("Skipping featurize_multi_qtrs() to avoid reprocessing...")
+            # Need to load the existing combined file for completeness stats
+            df_featurized_all_quarters = pd.read_csv(combined_file)
         else:
             # Process all quarters using featurize_multi_qtrs
             print(f"\nProcessing all quarters with featurize_multi_qtrs...")
-            featurize_multi_qtrs(quarter_directories, df_tags_to_featurize, 
-                                 N_qtrs_history_comp= DEFAULT_N_QUARTERS_HISTORY_COMP)
+            df_featurized_all_quarters = featurize_multi_qtrs(
+                quarter_directories, df_tags_to_featurize, 
+                N_qtrs_history_comp= DEFAULT_N_QUARTERS_HISTORY_COMP,
+                save_file_name=FEATURIZED_ALL_QUARTERS_FILE)
         
+        completeness_stats = summarize_feature_completeness(df_featurized_all_quarters)
+        completeness_stats.to_csv(FEATURE_COMPLETENESS_RANKING_FILE, index=False)
+
         # Filter the featurized data by completeness threshold and save to CSV
         print(f"\nFiltering featurized data by completeness threshold...")
-        df_simplified = filter_featured_data_by_completeness(processed_data_dir=SAVE_DIR, min_completeness=DEFAULT_MIN_COMPLETENESS)
+        df_simplified = filter_featured_data_by_completeness(
+            featurized_file=FEATURIZED_ALL_QUARTERS_FILE, 
+            completeness_file=FEATURE_COMPLETENESS_RANKING_FILE, 
+            min_completeness=DEFAULT_MIN_COMPLETENESS)
         print(f"✅ Featurization pipeline completed successfully!")
 
 

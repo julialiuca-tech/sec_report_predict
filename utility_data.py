@@ -3,7 +3,7 @@ import numpy as np
 import requests
 import os
 import json
-from config import DATA_DIR, STOCK_DIR
+from config import DATA_DIR, STOCK_DIR, MODEL_DIR
 
 
 def clean_cik_dup_submissions(submissions):
@@ -113,7 +113,7 @@ def top_tags(df_joined):
     # Sort by occurrences in descending order
     # NOTE: we sort by num of companies because some companies have ~6K segments 
     tag_stats_sorted = tag_stats.sort_values('distinct_companies', ascending=False)    
-    tag_stats_sorted.to_csv('tag_stats_sorted.csv', index=True, header=True)
+    tag_stats_sorted.to_csv(os.path.join(MODEL_DIR, 'tag_stats_sorted.csv'), index=True, header=True)
 
 
 def read_tags_to_featurize(K_top_tags=50):
@@ -129,7 +129,7 @@ def read_tags_to_featurize(K_top_tags=50):
     print(f"Creating tags to featurize dataframe for top {K_top_tags} tags...")
     
     # Read the top tags from tag_stats_sorted.csv
-    tag_stats = pd.read_csv(os.path.join(DATA_DIR, 'tag_stats_sorted.csv'), index_col=0)
+    tag_stats = pd.read_csv(os.path.join(MODEL_DIR, 'tag_stats_sorted.csv'), index_col=0)
     df_tags_to_featurize = pd.DataFrame({
         'rank': range(1, K_top_tags + 1),
         'tag': tag_stats.head(K_top_tags).index.tolist()
