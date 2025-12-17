@@ -75,8 +75,8 @@ FEATURE_IMPORTANCE_RANKING_FLAG = False  # If True, retrain model with top K fea
 # Model training parameters
 COMPLETENESS_THRESHOLD = 0.2
 Y_LABEL = 'trend_up_or_down'  # can be 'trend_up_or_down' or 'trend_5per_up'
-SPLIT_STRATEGY = {'cik':'random'} 
-SPLIT_STRATEGY = None
+SPLIT_STRATEGY = {'period':'bottom'} 
+# SPLIT_STRATEGY = None
  
 
 # =============================================================================

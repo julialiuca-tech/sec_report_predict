@@ -136,6 +136,22 @@ def split_train_val_by_column(df, train_prop, by_column, split_for_training='ran
         # Return DataFrames instead of masks
         df_train = df[train_mask].copy()
         df_val = df[val_mask].copy()
+        
+        # Print range of by_column values in both dataframes
+        if len(df_train) > 0:
+            train_min = df_train[by_column].min()
+            train_max = df_train[by_column].max()
+            print(f"📊 Training {by_column} range: {train_min} to {train_max}")
+        else:
+            print(f"📊 Training {by_column} range: (empty dataframe)")
+        
+        if len(df_val) > 0:
+            val_min = df_val[by_column].min()
+            val_max = df_val[by_column].max()
+            print(f"📊 Validation {by_column} range: {val_min} to {val_max}")
+        else:
+            print(f"📊 Validation {by_column} range: (empty dataframe)")
+        
         return df_train, df_val
         
     except Exception as e:
@@ -195,9 +211,9 @@ def baseline_binary_classifier(X_train, X_val, y_train, y_val, model_name):
         'precision': precision,
         'recall': recall,
         'roc_auc': roc_auc, 
-        'feature_importance': feature_importance
+        'feature_importance': feature_importance, 
+        'y_pred_proba': y_pred_proba
     }
-
 
 
 def correlation_analysis(df, feature_cols, target_label):

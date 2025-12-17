@@ -441,7 +441,7 @@ def frame_to_qtrs(frame: Optional[str], period_start: Optional[str] = None,
     qtrs value representing duration in quarters.
     
     The qtrs field represents duration in quarters:
-      - 0 = Instant (point in time, like balance sheet)
+    - 0 = Instant (point in time, like balance sheet)
       - 1 = 1 quarter duration
       - 2 = 2 quarter duration (half year)
       - 3 = 3 quarter duration

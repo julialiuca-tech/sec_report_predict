@@ -24,21 +24,26 @@ import os
 
 # Import the function from featurize.py
 from featurize import summarize_feature_completeness
+from config import SAVE_DIR
 
 # =============================================================================
 # FEATURE COMPLETENESS VALIDATION FUNCTIONS
 # =============================================================================
 
-def load_quarter_files(processed_data_dir="processed_data"):
+def load_quarter_files(processed_data_dir=None):
     """
     Load individual quarter featurized CSV files.
     
     Args:
-        processed_data_dir (str): Directory containing the processed data files
+        processed_data_dir (str): Directory containing the processed data files. 
+                                  Defaults to SAVE_DIR from config if None.
         
     Returns:
         dict: Dictionary with quarter names as keys and DataFrames as values
     """
+    if processed_data_dir is None:
+        processed_data_dir = SAVE_DIR
+    
     quarter_files = {}
     quarter_patterns = ['2022q1', '2022q2', '2022q3', '2022q4']
     
@@ -78,16 +83,20 @@ def analyze_individual_quarters(quarter_files):
     
     return quarter_analyses
 
-def analyze_combined_file(processed_data_dir="processed_data"):
+def analyze_combined_file(processed_data_dir=None):
     """
     Analyze feature completeness for the combined featurized_all_quarters.csv file.
     
     Args:
-        processed_data_dir (str): Directory containing the processed data files
+        processed_data_dir (str): Directory containing the processed data files.
+                                  Defaults to SAVE_DIR from config if None.
         
     Returns:
         pd.DataFrame: Completeness analysis of the combined file
     """
+    if processed_data_dir is None:
+        processed_data_dir = SAVE_DIR
+    
     combined_file_path = os.path.join(processed_data_dir, "featurized_all_quarters.csv")
     
     if not os.path.exists(combined_file_path):
@@ -108,16 +117,20 @@ def analyze_combined_file(processed_data_dir="processed_data"):
         print(f"  - Error analyzing combined file: {e}")
         return None
 
-def analyze_combined_by_data_dir(processed_data_dir="processed_data"):
+def analyze_combined_by_data_dir(processed_data_dir=None):
     """
     Analyze the combined file by grouping on data_qtr to see breakdown by quarter.
     
     Args:
-        processed_data_dir (str): Directory containing the processed data files
+        processed_data_dir (str): Directory containing the processed data files.
+                                  Defaults to SAVE_DIR from config if None.
         
     Returns:
         dict: Dictionary with data_qtr as keys and feature counts as values
     """
+    if processed_data_dir is None:
+        processed_data_dir = SAVE_DIR
+    
     combined_file_path = os.path.join(processed_data_dir, "featurized_all_quarters.csv")
     
     if not os.path.exists(combined_file_path):
@@ -289,12 +302,13 @@ def compare_results(quarter_analyses, combined_analysis, data_dir_analyses=None)
 # DUPLICATE TUPLE ANALYSIS FUNCTIONS
 # =============================================================================
 
-def check_duplicate_tuples_across_quarters(processed_data_dir="processed_data"):
+def check_duplicate_tuples_across_quarters(processed_data_dir=None):
     """
     Check for duplicate (cik, period) tuples across different quarters.
     
     Args:
-        processed_data_dir (str): Directory containing the processed data files
+        processed_data_dir (str): Directory containing the processed data files.
+                                  Defaults to SAVE_DIR from config if None.
         
     Returns:
         dict: Analysis results with duplicate information
@@ -304,6 +318,9 @@ def check_duplicate_tuples_across_quarters(processed_data_dir="processed_data"):
     CIK: 1657249, Period: 20220630, appears in 2 quarters 2022q2, 2022q3
     TO-DO: remove the duplicate tuples from the combined featurization. 
     """
+    if processed_data_dir is None:
+        processed_data_dir = SAVE_DIR
+    
     print("\n" + "="*80)
     print("DUPLICATE (cik, period) TUPLE ANALYSIS")
     print("="*80)
@@ -425,10 +442,17 @@ def check_duplicate_tuples_across_quarters(processed_data_dir="processed_data"):
             'tuples_in_all_quarters': 0
         }
 
-def check_combined_file_tuples(processed_data_dir="processed_data"):
+def check_combined_file_tuples(processed_data_dir=None):
     """
     Check the combined file for (cik, period) tuple patterns.
+    
+    Args:
+        processed_data_dir (str): Directory containing the processed data files.
+                                  Defaults to SAVE_DIR from config if None.
     """
+    if processed_data_dir is None:
+        processed_data_dir = SAVE_DIR
+    
     print("\n" + "="*80)
     print("COMBINED FILE TUPLE ANALYSIS")
     print("="*80)
@@ -482,17 +506,21 @@ def check_combined_file_tuples(processed_data_dir="processed_data"):
 # MAIN VALIDATION FUNCTION
 # =============================================================================
 
-def analyze_feature_completeness_ranking(processed_data_dir="processed_data", min_completeness=20.0):
+def analyze_feature_completeness_ranking(processed_data_dir=None, min_completeness=20.0):
     """
     Analyze the feature completeness ranking to identify the most populated features.
     
     Args:
-        processed_data_dir (str): Directory containing the processed data files
+        processed_data_dir (str): Directory containing the processed data files.
+                                  Defaults to SAVE_DIR from config if None.
         min_completeness (float): Minimum completeness percentage to include features
         
     Returns:
         dict: Analysis results with feature statistics
     """
+    if processed_data_dir is None:
+        processed_data_dir = SAVE_DIR
+    
     print("📊 ANALYZING FEATURE COMPLETENESS RANKING")
     print("="*80)
     
@@ -680,8 +708,8 @@ def check_consistency_of_featurized_data():
     print("🔍 COMPREHENSIVE FEATURIZED DATA VALIDATION")
     print("="*80)
     
-    # Check if processed_data directory exists
-    processed_data_dir = "processed_data"
+    # Use SAVE_DIR from config as the default directory
+    processed_data_dir = SAVE_DIR
     if not os.path.exists(processed_data_dir):
         print(f"Error: {processed_data_dir} directory not found")
         return

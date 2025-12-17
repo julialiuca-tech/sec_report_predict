@@ -39,7 +39,9 @@ from config import (
 )
 from feature_augment import compute_ratio_features, flag_outliers_by_hard_limits
 from featurize import enhance_tags_w_gradient
+from utility_data import standardize_df_to_reference
 from utility_binary_classifier import baseline_binary_classifier, split_train_val_by_column
+from config import SAVE_DIR
 
 
 def collect_column_names_w_suffix(cols, feature_suffixes=['_current']):
@@ -55,15 +57,19 @@ def collect_column_names_w_suffix(cols, feature_suffixes=['_current']):
     """
     return [col for col in cols if any(col.endswith(suffix) for suffix in feature_suffixes)]
 
-def prep_data_feature_label(featurized_data_file=FEATURIZED_ALL_QUARTERS_FILE, 
-                             stock_trend_data_file=STOCK_TREND_DATA_FILE, 
-                             quarters_for_gradient_comp=None):
+def prep_data_feature_label(df_featurized_data, 
+                            df_stock_trend,
+                            df_history_data=None, 
+                            quarters_for_gradient_comp=None):
     """
-    Load and join featurized data with stock trends.
+    Process and join featurized data with stock trends.
     
     Args:
-        featurized_data_file (str): Path to featurized data file
-        stock_trend_data_file (str): Path to stock trend data file
+        df_featurized_data (pd.DataFrame): Featurized data DataFrame
+        df_stock_trend (pd.DataFrame): Stock trend data DataFrame (required)
+        df_history_data (pd.DataFrame, optional): Historical data DataFrame for gradient computation.
+                                                   If provided, will be used to standardize columns and 
+                                                   compute gradient features.
         quarters_for_gradient_comp (list, optional): List of quarters to compute gradients from. 
                                                     If None, no gradient features are computed.
     
@@ -71,9 +77,22 @@ def prep_data_feature_label(featurized_data_file=FEATURIZED_ALL_QUARTERS_FILE,
         pd.DataFrame: Joined dataset with features and labels
     """
     
-    # Load simplified featurized data 
-    df_features = pd.read_csv(featurized_data_file)
+    # Use provided featurized data
+    df_features = df_featurized_data.copy()
     print(f"Features loaded: {df_features.shape}")
+
+    # Prepare history data for gradient computation if provided
+    df_history_for_gradient = None
+    if df_history_data is not None:
+        df_history = df_history_data.copy()
+        print(f"History loaded: {df_history.shape}")
+        df_features = standardize_df_to_reference(df_features, df_history)
+        # Also prepare history data for gradient computation
+        # Apply same processing steps to history data
+        if USE_RATIO_FEATURES:
+            df_history_for_gradient = compute_ratio_features(df_history.copy())
+        else:
+            df_history_for_gradient = df_history.copy()
     
     # Deduplicate features to ensure clean data from the start
     initial_count = len(df_features)
@@ -87,22 +106,24 @@ def prep_data_feature_label(featurized_data_file=FEATURIZED_ALL_QUARTERS_FILE,
     if USE_RATIO_FEATURES:
         df_features = compute_ratio_features(df_features)
         print(f"Ratio features computed: {df_features.shape}") 
+
+    # enhance with gradient features
+    if quarters_for_gradient_comp is not None:
+        df_features = enhance_tags_w_gradient(df_features, 
+                                              df_extra_history_for_gradient=df_history_for_gradient,
+                                              quarters_for_gradient_comp=quarters_for_gradient_comp, 
+                                              suffixes_to_enhance=SUFFIXES_TO_ENHANCE_W_GRADIENT)
+        print(f"Gradient features loaded: {df_features.shape}") 
+
     # filter outliers from ratio features
     if FILTER_OUTLIERS_FROM_RATIOS:
         df_features = flag_outliers_by_hard_limits(df_features)
         df_features = df_features[df_features['flag_outlier'] == False]
         df_features.drop(columns=['flag_outlier'], inplace=True)
         print(f"Outliers filtered from ratio features: {df_features.shape} records remaining") 
-
-    # enhance with gradient features
-    if quarters_for_gradient_comp is not None:
-        df_features = enhance_tags_w_gradient(df_features, 
-                                              quarters_for_gradient_comp, 
-                                              suffixes_to_enhance=SUFFIXES_TO_ENHANCE_W_GRADIENT)
-        print(f"Gradient features loaded: {df_features.shape}") 
     
-    # Load ground truth -- stock price trends
-    df_trends = pd.read_csv(stock_trend_data_file)
+    # Use provided stock trends
+    df_trends = df_stock_trend.copy()
     print(f"Trends loaded: {df_trends.shape}")
 
     # Join features and trends on cik and year_month resolution
@@ -399,8 +420,15 @@ def main():
     print("=" * 60)
     
     # Prepare data (you can change split_strategy to 'date' for time-based splitting)
-    # Load and join data
-    df = prep_data_feature_label(quarters_for_gradient_comp=QUARTER_GRADIENTS)
+    # Load featurized data and stock trends
+    df_features = pd.read_csv(FEATURIZED_ALL_QUARTERS_FILE)
+    df_trends = pd.read_csv(STOCK_TREND_DATA_FILE)
+    df = prep_data_feature_label(df_featurized_data=df_features, 
+                                  df_stock_trend=df_trends,
+                                  quarters_for_gradient_comp=QUARTER_GRADIENTS)
+    pickle_file = os.path.join(SAVE_DIR, 'df_all.pkl')
+    df.to_pickle(pickle_file)
+    print(f"📊 All data pickled: {df.shape}")
     
     # Split data into train/val sets
     df_train, df_val = split_data_for_train_val(df, 

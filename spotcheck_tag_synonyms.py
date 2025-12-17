@@ -83,6 +83,9 @@ KEY_METRICS = [
     'StockholdersEquity'
 ]
 
+
+PICKLE_FILE = 'metric_all_matches.pkl'
+
 # =============================================================================
 # FINANCIAL LANGUAGE MODEL FOR SEMANTIC SIMILARITY
 # =============================================================================
@@ -811,11 +814,10 @@ def main_compute_matches():
         metric_top1_matches[company_name] = top1_matches
         metric_all_matches[company_name] = all_matches
     
-    # Save all matches to pickle file
-    pickle_file = 'metric_all_matches.pkl'
-    with open(pickle_file, 'wb') as f:
+    # Save all matches to pickle file 
+    with open(PICKLE_FILE, 'wb') as f:
         pickle.dump({'metric_top1_matches': metric_top1_matches, 'metric_all_matches': metric_all_matches}, f)
-    print(f"\n💾 Saved all matches to: {pickle_file}")
+    print(f"\n💾 Saved all matches to: {PICKLE_FILE}")
     
     return metric_top1_matches, metric_all_matches
 
@@ -823,14 +825,12 @@ def main():
     """
     Main function to spot check SEC reports and find tag matches for key metrics.
     Uses cached pickle file if available to avoid recomputing matches.
-    """
-    # pickle_file = os.path.join(DATA_BASE_DIR, 'metric_all_matches.pkl')
-    pickle_file = 'metric_all_matches.pkl'
+    """ 
     
     # Check if pickle file exists
-    if os.path.exists(pickle_file):
-        print(f"📂 Loading matches from cache: {pickle_file}")
-        with open(pickle_file, 'rb') as f:
+    if os.path.exists(PICKLE_FILE):
+        print(f"📂 Loading matches from cache: {PICKLE_FILE}")
+        with open(PICKLE_FILE, 'rb') as f:
             cached_data = pickle.load(f)
             
             # Check if it's the new format (dict with both keys) or old format (just metric_all_matches)
@@ -857,12 +857,12 @@ def main():
             print("❌ Failed to compute matches. Exiting.")
             return
         # Sav/update pickle file with all results (matching the read structure)
-        with open(pickle_file, 'wb') as f:
+        with open(PICKLE_FILE, 'wb') as f:
             pickle.dump({
                 'metric_top1_matches': metric_top1_matches,
                 'metric_all_matches': metric_all_matches
             }, f)
-        print(f"💾 Saved matches to: {pickle_file}")
+        print(f"💾 Saved matches to: {PICKLE_FILE}")
         
     # Analyze top 1 match agreement across companies
     top1_match_agree_stats(metric_top1_matches)
@@ -879,3 +879,138 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+# # output trace, saved here for reference
+# ================================================================================
+# VOTING ANALYSIS: Most Common Tag Across All Matches
+# ================================================================================
+
+# AccountsReceivableNetCurrent:
+#   Most common tag: AccountsReceivableNetCurrent
+#   6 companies use this tag: AAPL, MSFT, TSLA, AMZN, JNJ, PG
+
+# Assets:
+#   Most common tag: Assets
+#   10 companies use this tag: INTU, AAPL, MSFT, TSLA, JPM, WMT, AMZN, JNJ, XOM, PG
+#   Runner-up tag: OtherAssetsNoncurrent
+#   9 companies use this tag: INTU, AAPL, MSFT, TSLA, WMT, AMZN, JNJ, XOM, PG
+
+# AssetsCurrent:
+#   Most common tag: AssetsCurrent
+#   9 companies use this tag: INTU, AAPL, MSFT, TSLA, WMT, AMZN, JNJ, XOM, PG
+#   Runner-up tag: PrepaidExpenseAndOtherAssetsCurrent
+#   5 companies use this tag: INTU, TSLA, WMT, JNJ, PG
+
+# CashAndCashEquivalentsAtCarryingValue:
+#   Most common tag: CashAndCashEquivalentsAtCarryingValue
+#   8 companies use this tag: INTU, AAPL, MSFT, TSLA, WMT, AMZN, JNJ, XOM
+#   Runner-up tag: RestrictedCashAndCashEquivalentsAtCarryingValue
+#   1 companies use this tag: XOM
+
+# CommonStockSharesOutstanding:
+#   Most common tag: CommonStockSharesOutstanding
+#   8 companies use this tag: INTU, AAPL, MSFT, TSLA, WMT, AMZN, XOM, PG
+
+# CostOfGoodsAndServicesSold:
+#   Most common tag: CostOfGoodsAndServicesSold
+#   6 companies use this tag: INTU, AAPL, MSFT, AMZN, JNJ, PG
+#   Runner-up tag: CostOfGoodsAndServicesSoldAmortization
+#   1 companies use this tag: INTU
+
+# DepreciationDepletionAndAmortization:
+#   Most common tag: DepreciationDepletionAndAmortization
+#   5 companies use this tag: AAPL, AMZN, JNJ, XOM, PG
+#   Runner-up tag: AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment
+#   2 companies use this tag: MSFT, JNJ
+
+# GrossProfit:
+#   Most common tag: GrossProfit
+#   4 companies use this tag: AAPL, MSFT, TSLA, JNJ
+#   Runner-up tag: GrossProfitPercentToSales
+#   1 companies use this tag: JNJ
+
+# InterestExpense:
+#   Most common tag: InterestExpenseNonoperating
+#   4 companies use this tag: TSLA, AMZN, JNJ, PG
+#   Runner-up tag: InterestExpenseDebt
+#   2 companies use this tag: INTU, WMT
+
+# InventoryNet:
+#   Most common tag: InventoryNet
+#   7 companies use this tag: AAPL, MSFT, TSLA, WMT, AMZN, JNJ, PG
+#   Runner-up tag: InventoryPartsAndComponentsNetOfReserves
+#   1 companies use this tag: XOM
+
+# LiabilitiesCurrent:
+#   Most common tag: LiabilitiesCurrent
+#   9 companies use this tag: INTU, AAPL, MSFT, TSLA, WMT, AMZN, JNJ, XOM, PG
+#   Runner-up tag: AccruedLiabilitiesCurrent
+#   4 companies use this tag: WMT, AMZN, JNJ, PG
+
+# LongTermDebtNoncurrent:
+#   Most common tag: LongTermDebtNoncurrent
+#   7 companies use this tag: INTU, AAPL, MSFT, WMT, AMZN, JNJ, PG
+#   Runner-up tag: LongTermDebtAndFinanceLeasesNoncurrent
+#   1 companies use this tag: TSLA
+
+# NetCashProvidedByUsedInOperatingActivities:
+#   Most common tag: NetCashProvidedByUsedInOperatingActivities
+#   10 companies use this tag: INTU, AAPL, MSFT, TSLA, JPM, WMT, AMZN, JNJ, XOM, PG
+#   Runner-up tag: NetCashProvidedByUsedInInvestingActivities
+#   10 companies use this tag: INTU, AAPL, MSFT, TSLA, JPM, WMT, AMZN, JNJ, XOM, PG
+
+# NetIncomeLoss:
+#   Most common tag: NetIncomeLoss
+#   10 companies use this tag: INTU, AAPL, MSFT, TSLA, JPM, WMT, AMZN, JNJ, XOM, PG
+#   Runner-up tag: OtherComprehensiveIncomeLossNetOfTax
+#   7 companies use this tag: INTU, TSLA, WMT, AMZN, JNJ, XOM, PG
+
+# OperatingIncomeLoss:
+#   Most common tag: OperatingIncomeLoss
+#   7 companies use this tag: INTU, AAPL, MSFT, TSLA, WMT, AMZN, PG
+#   Runner-up tag: AdjustmentsNoncashItemsToReconcileNetIncomeLossToCashProvidedByUsedInOperatingActivities
+#   1 companies use this tag: INTU
+
+# PaymentsToAcquirePropertyPlantAndEquipment:
+#   Most common tag: PaymentsToAcquirePropertyPlantAndEquipment
+#   8 companies use this tag: INTU, AAPL, MSFT, TSLA, WMT, JNJ, XOM, PG
+
+# Revenues:
+#   Most common tag: Revenues
+#   4 companies use this tag: INTU, WMT, XOM, PG
+#   Runner-up tag: RevenuesNetOfInterestExpense
+#   1 companies use this tag: JPM
+
+# RevenueFromContractWithCustomerExcludingAssessedTax:
+#   Most common tag: RevenueFromContractWithCustomerExcludingAssessedTax
+#   6 companies use this tag: AAPL, MSFT, TSLA, WMT, AMZN, JNJ
+
+# StockholdersEquity:
+#   Most common tag: StockholdersEquity
+#   9 companies use this tag: INTU, AAPL, MSFT, TSLA, JPM, WMT, AMZN, JNJ, XOM
+
+
+
+# Total unique companies (CIK): 6,074
+# AccountsReceivableNetCurrent: AccountsReceivableNetCurrent  Percentage of companies: 48.53%
+# Assets: Assets  Percentage of companies: 99.61%
+# AssetsCurrent: AssetsCurrent  Percentage of companies: 76.25%
+# CashAndCashEquivalentsAtCarryingValue: CashAndCashEquivalentsAtCarryingValue  Percentage of companies: 77.26%
+# CommonStockSharesOutstanding: CommonStockSharesOutstanding  Percentage of companies: 86.55%
+# CostOfGoodsAndServicesSold: CostOfGoodsAndServicesSold  Percentage of companies: 30.54%
+# DepreciationDepletionAndAmortization: DepreciationDepletionAndAmortization  Percentage of companies: 40.12%
+# GrossProfit: GrossProfit  Percentage of companies: 35.09%
+# InterestExpense: InterestExpenseNonoperating  Percentage of companies: 29.73%
+# InventoryNet: InventoryNet  Percentage of companies: 38.21%
+# LiabilitiesCurrent: LiabilitiesCurrent  Percentage of companies: 75.75%
+# LongTermDebtNoncurrent: LongTermDebtNoncurrent  Percentage of companies: 24.88%
+# NetCashProvidedByUsedInOperatingActivities: NetCashProvidedByUsedInOperatingActivities  Percentage of companies: 98.09%
+# NetIncomeLoss: NetIncomeLoss  Percentage of companies: 93.15%
+# OperatingIncomeLoss: OperatingIncomeLoss  Percentage of companies: 75.29%
+# PaymentsToAcquirePropertyPlantAndEquipment: PaymentsToAcquirePropertyPlantAndEquipment  Percentage of companies: 57.33%
+# Revenues: Revenues  Percentage of companies: 31.67%
+# RevenueFromContractWithCustomerExcludingAssessedTax: RevenueFromContractWithCustomerExcludingAssessedTax  Percentage of companies: 43.52%
+# StockholdersEquity: StockholdersEquity  Percentage of companies: 91.88%
+

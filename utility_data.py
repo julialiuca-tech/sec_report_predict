@@ -525,3 +525,48 @@ def filter_by_date_continuity(df, date_col, stop_date='2025-01-01', gap_in_days=
         return df_work, []
 
 
+def standardize_df_to_reference(df, df_ref):
+    """
+    Standardize a dataframe to match the column structure of a reference dataframe.
+    
+    This function ensures that df has the same columns as df_ref. If df_ref contains
+    columns that df doesn't have, those columns are added to df and filled with NULL/NaN values.
+    The columns in df are also reordered to match the column order in df_ref.
+    
+    Args:
+        df (pd.DataFrame): The dataframe to standardize
+        df_ref (pd.DataFrame): The reference dataframe whose column structure to match
+    
+    Returns:
+        pd.DataFrame: Standardized dataframe with the same columns as df_ref, in the same order.
+                     Missing columns are filled with NaN values.
+    
+    Example:
+        >>> df = pd.DataFrame({'a': [1, 2], 'b': [3, 4]})
+        >>> df_ref = pd.DataFrame({'a': [1], 'b': [2], 'c': [3]})
+        >>> df_std = standardize_df_to_reference(df, df_ref)
+        >>> # df_std will have columns ['a', 'b', 'c'] with 'c' filled with NaN
+    """
+    # Make a copy to avoid modifying the original
+    df_standardized = df.copy()
+    
+    # Get columns in reference dataframe
+    ref_columns = df_ref.columns.tolist()
+    
+    # Find columns missing in df
+    missing_columns = [col for col in ref_columns if col not in df_standardized.columns]
+    
+    # Add missing columns filled with NaN
+    if missing_columns:
+        for col in missing_columns:
+            df_standardized[col] = np.nan
+        print(f"📊 Added {len(missing_columns)} missing columns filled with NaN: {missing_columns}")
+    
+    # Reorder columns to match reference dataframe order
+    # Only select columns that exist in reference (in case df has extra columns)
+    available_columns = [col for col in ref_columns if col in df_standardized.columns]
+    df_standardized = df_standardized[available_columns]
+    
+    return df_standardized
+
+

@@ -3,7 +3,7 @@ import numpy as np
 import os
 import re
 
-from utility_data import load_and_join_sec_xbrl_data, print_featurization, read_tags_to_featurize, get_cik_ticker_mapping
+from utility_data import load_and_join_sec_xbrl_data, read_tags_to_featurize, get_cik_ticker_mapping, standardize_df_to_reference
 from config import (
     SAVE_DIR, DATA_BASE_DIR, FEATURIZED_ALL_QUARTERS_FILE, FEATURE_COMPLETENESS_RANKING_FILE,
     FEATURIZED_SIMPLIFIED_FILE, QUARTER_FEATURIZED_PATTERN, DEFAULT_K_TOP_TAGS,
@@ -705,7 +705,8 @@ def filter_featured_data_by_completeness(
             featurized_file = FEATURIZED_ALL_QUARTERS_FILE, 
             completeness_file = FEATURE_COMPLETENESS_RANKING_FILE, 
             min_completeness=DEFAULT_MIN_COMPLETENESS,
-            processed_data_dir=SAVE_DIR):
+            processed_data_dir=SAVE_DIR, 
+            debug_print=DEFAULT_DEBUG_FLAG):
     """
     Filter featurized data by feature completeness threshold and remove duplicates.
     
@@ -732,10 +733,10 @@ def filter_featured_data_by_completeness(
         raise FileNotFoundError(f"Featurized data file not found: {featurized_file_path}")
     
     df_featurized = pd.read_csv(featurized_file_path, low_memory=False)
-    print(f"📊 Input data shape: {df_featurized.shape}")
+    if debug_print:
+        print(f"📊 Input data shape: {df_featurized.shape}")
     
     # Step 2: Filter out CIKs that don't map to tickers
-    print("🔍 Filtering CIKs that don't map to ticker symbols...")
     cik_to_ticker, ticker_to_cik = get_cik_ticker_mapping()
     
     if cik_to_ticker:
@@ -748,10 +749,12 @@ def filter_featured_data_by_completeness(
         # Drop the temporary cik_str column
         df_featurized = df_featurized.drop('cik_str', axis=1)
         
-        print(f"📊 After CIK filtering: {df_featurized.shape}")
-        print(f"✅ Kept only CIKs with ticker symbols for stock price data availability")
+        if debug_print:
+            print("🔍 Filtering CIKs that don't map to ticker symbols... ")
+            print(f"📊 After CIK filtering: {df_featurized.shape}")
     else:
-        print("⚠️  Warning: Could not load CIK->ticker mapping. Keeping all CIKs.")
+        if debug_print:
+            print("⚠️  Warning: Could not load CIK->ticker mapping. Keeping all CIKs.")
     
     # Step 3: Read the feature_completeness_ranking.csv file
     # Handle both full paths and filenames
@@ -788,7 +791,6 @@ def filter_featured_data_by_completeness(
         df_simplified = df_simplified.sort_values(['cik', 'period', 'data_qtr'], ascending=[True, True, False])
         df_simplified = df_simplified.drop_duplicates(subset=['cik', 'period'], keep='first')
     
-    print(f"📊 Output data shape: {df_simplified.shape}")
     
     # Step 6: Write the filtered dataframe to CSV file
     # Generate simplified filename from the input filename
@@ -796,12 +798,18 @@ def filter_featured_data_by_completeness(
     simplified_file_name = base_name.replace('.csv', '_simplified.csv')
     simplified_file_path = os.path.join(os.path.dirname(featurized_file_path), simplified_file_name)
     df_simplified.to_csv(simplified_file_path, index=False)
-    print(f"💾 Filtered data saved to: {simplified_file_path}")
     
+    if debug_print:
+        print(f"📊 Output data shape: {df_simplified.shape}")
+        print(f"💾 Filtered data saved to: {simplified_file_path}")
+
     return df_simplified
 
 
-def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp, suffixes_to_enhance=['_current']):
+def enhance_tags_w_gradient(df_work, df_extra_history_for_gradient, 
+                            quarters_for_gradient_comp, 
+                            suffixes_to_enhance=['_current'], 
+                            debug_print=DEFAULT_DEBUG_FLAG):
     """
     Enhance featurized data with gradient features by computing relative changes
     from previous quarters.
@@ -812,53 +820,90 @@ def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp, suffixes_to_enh
         suffixes_to_enhance (list, optional): List of suffixes to compute gradients for. 
                                              Defaults to ['_current'] for backward compatibility.
                                              Example: ['_current', '_augment'] will process features ending with either suffix.
+        df_extra_history_for_gradient (pd.DataFrame, optional): Additional historical dataframe to use when looking up
+                                                               historical periods. If provided, will be concatenated with
+                                                               df_work to create a combined dataset for historical lookup.
     
     This function:
     1. Takes the input dataframe df_work
-    2. For each feature ending with any suffix in suffixes_to_enhance, looks up values from specified quarters ago
-    3. Computes relative change percentages and creates new features with "_change_q{N}" suffixes
-    4. Returns enhanced dataframe with gradient features
+    2. If df_extra_history_for_gradient is provided, concatenates it with df_work to create df_work_w_extra_history
+    3. For each feature ending with any suffix in suffixes_to_enhance, looks up values from specified quarters ago
+       using df_work_w_extra_history (or df_work if no extra history is provided)
+    4. Computes relative change percentages and creates new features with "_change_q{N}" suffixes
+    5. Returns enhanced dataframe with gradient features
     
     Returns:
         pd.DataFrame: Enhanced dataframe with gradient features (df_work_w_gradient)
     """ 
     
-    print("🔄 Enhancing features with gradient information...")
-    print("=" * 60)
+    # Assert that df_work and df_extra_history_for_gradient have the same columns if extra history is provided
+    if df_extra_history_for_gradient is not None:
+        df_work_cols = set(df_work.columns)
+        df_extra_cols = set(df_extra_history_for_gradient.columns)
+        assert df_work_cols == df_extra_cols, (
+            f"df_work and df_extra_history_for_gradient must have the same columns. "
+            f"df_work has {len(df_work_cols)} columns, df_extra_history has {len(df_extra_cols)} columns. "
+            f"Columns only in df_work: {df_work_cols - df_extra_cols}. "
+            f"Columns only in df_extra_history: {df_extra_cols - df_work_cols}."
+        )
     
-    print(f"📊 Input dataframe shape: {df_work.shape}")
-    
-    # Identify features ending with any of the specified suffixes
+    if debug_print:
+        print("🔄 Enhancing features with gradient information...")
+        print("=" * 60)
+        print(f"📊 Input dataframe shape: {df_work.shape}")
+        if df_extra_history_for_gradient is not None:
+            print(f"📊 Extra history dataframe shape: {df_extra_history_for_gradient.shape}")
+        
+        # Identify features ending with any of the specified suffixes
     features_to_enhance = []
     for suffix in suffixes_to_enhance:
         matching_features = [col for col in df_work.columns if col.endswith(suffix)]
         features_to_enhance.extend(matching_features)
-        print(f"🔍 Found {len(matching_features)} features ending with '{suffix}'")
-    
+
+
     # Remove duplicates (in case a column somehow matches multiple suffixes)
     features_to_enhance = list(set(features_to_enhance))
-    
-    print(f"📋 Total unique features to enhance: {len(features_to_enhance)}")
+    if debug_print:
+        print(f"📋 Total unique features to enhance: {len(features_to_enhance)}")
     
     if not features_to_enhance:
         print(f"⚠️  No features ending with any of {suffixes_to_enhance} found. Returning original dataframe.")
         return df_work
     
     # Convert period to datetime for easier manipulation
-    df_work['period'] = pd.to_datetime(df_work['period'], format='%Y%m%d')
+    df_work_copy = df_work.copy()
+    df_work_copy['period'] = pd.to_datetime(df_work_copy['period'], format='%Y%m%d')
+    
+    # Concatenate df_work with df_extra_history_for_gradient if provided
+    if df_extra_history_for_gradient is not None:
+        df_extra_history_copy = df_extra_history_for_gradient.copy()
+        df_extra_history_copy['period'] = pd.to_datetime(df_extra_history_copy['period'], format='%Y%m%d')
+        df_work_w_extra_history = pd.concat([df_work_copy, df_extra_history_copy], ignore_index=True)
+        # Remove duplicates based on (cik, period) to ensure clean data
+        df_work_w_extra_history = df_work_w_extra_history.drop_duplicates(subset=['cik', 'period'], keep='first')
+    else:
+        df_work_w_extra_history = df_work_copy
     
     # Create historical data for each specified quarter
     historical_data = {}
     for q in quarters_for_gradient_comp:
-        df_historical = df_work.copy()
-        # Subtract months to go back in time (q quarters = q * 3 months)
-        df_historical['period'] = df_historical['period'] - pd.DateOffset(months=q * 3)
+        df_historical = df_work_w_extra_history.copy()
+        # Shift historical periods forward by q*3 months to match with current periods
+        # Note: We normalize to month-end to handle cases where month-end dates differ
+        # (e.g., April 30 -> July 31, not July 30)
+        df_historical['period'] = df_historical['period'] + pd.DateOffset(months=q * 3)
+        # Normalize to month-end: convert to Period with month frequency, then back to month-end date
+        df_historical['period'] = df_historical['period'].dt.to_period('M').dt.to_timestamp('M')
         # Convert back to original format for joining
         df_historical['period'] = df_historical['period'].dt.strftime('%Y%m%d').astype(int)
         historical_data[q] = df_historical
     
+    # Normalize current periods to month-end as well for consistent matching
+    # Convert to Period with month frequency, then back to month-end timestamp
+    df_work_copy['period'] = df_work_copy['period'].dt.to_period('M').dt.to_timestamp('M')
     # Convert back to original format for joining
-    df_work['period'] = df_work['period'].dt.strftime('%Y%m%d').astype(int)
+    df_work_copy['period'] = df_work_copy['period'].dt.strftime('%Y%m%d').astype(int)
+    df_work = df_work_copy
     
     # Create gradient features
     df_work_w_gradient = df_work.copy()
@@ -886,7 +931,7 @@ def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp, suffixes_to_enh
         
         historical_subsets[q] = df_historical_subset
     
-    if total_duplicates > 0:
+    if debug_print: 
         print(f"🔍 Removed {total_duplicates} total duplicates from historical data")
     
     # Merge all historical data
@@ -894,12 +939,10 @@ def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp, suffixes_to_enh
         df_work_w_gradient = df_work_w_gradient.merge(historical_subsets[q], on=['cik', 'period'], how='left')
     
     # Verify row count hasn't changed
-    if len(df_work_w_gradient) != len(df_work):
+    if debug_print and len(df_work_w_gradient) != len(df_work):
         print(f"⚠️  Warning: Row count changed from {len(df_work)} to {len(df_work_w_gradient)}")
     
-    # Compute all gradient features at once using vectorized operations
-    print(f"🔄 Computing gradients for {len(features_to_enhance)} features across {len(quarters_for_gradient_comp)} quarters...")
-    
+ 
     # Create all gradient feature names and compute gradients for each quarter
     all_gradient_features = []
     all_gradient_dfs = []
@@ -944,7 +987,8 @@ def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp, suffixes_to_enh
     # Clean up temporary columns
     df_work_w_gradient = df_work_w_gradient.drop(columns=temp_columns_to_remove, errors='ignore')
     
-    print(f"✅ Enhanced dataframe shape: {df_work_w_gradient.shape}")
+    if debug_print:
+        print(f"✅ Enhanced dataframe shape: {df_work_w_gradient.shape}")
     
     # Verify row count is preserved
     if len(df_work_w_gradient) == len(df_work):
@@ -955,10 +999,11 @@ def enhance_tags_w_gradient(df_work, quarters_for_gradient_comp, suffixes_to_enh
     
     # Count new gradient features
     gradient_features = [col for col in df_work_w_gradient.columns if any(col.endswith(f'_change_q{q}') for q in quarters_for_gradient_comp)]
-    print(f"📊 Added {len(gradient_features)} gradient features")
+    if debug_print:
+        print(f"📊 Added {len(gradient_features)} gradient features")
     
     # Show sample of new features
-    if gradient_features:
+    if debug_print and gradient_features:
         print("🔍 Sample gradient features:")
         for feature in gradient_features[:5]:  # Show first 5
             print(f"  - {feature}")
@@ -1049,6 +1094,91 @@ def featurize_all_sec_quarters():
             min_completeness=DEFAULT_MIN_COMPLETENESS)
         print(f"✅ Featurization pipeline completed successfully!")
 
+
+
+def script_featurize_before_and_after_cutoff():
+    """ 
+    One-time script to featurize data before and after the holdback date.
+    Featurize data before and after the holdback date.
+    """
+    # Holdback date: 2024-06-30 (inclusive)
+    holdback_date = pd.Period('2024-06', freq='M')
+    
+    print(f"\n📊 Investment Strategy with Holdback")
+    print(f"📅 Train on data up to: {holdback_date}")
+    print(f"📅 Test on data from: {holdback_date + 1}")
+    print("="*60)
+    
+    # Step 1: Find all quarter directories
+    quarter_directories = []
+    if os.path.exists(DATA_BASE_DIR):
+        quarter_pattern = re.compile(r'^[0-9]{4}[qQ][1-4]$')
+        for item in os.listdir(DATA_BASE_DIR):
+            item_path = os.path.join(DATA_BASE_DIR, item)
+            if os.path.isdir(item_path) and quarter_pattern.match(item):
+                quarter_directories.append(item_path)
+    
+    quarter_directories.sort()
+    
+    # Separate quarters into train (up to 2024q2) and test (2024q3 onwards)
+    train_quarter_dirs = []
+    test_quarter_dirs = []
+    
+    for qtr_dir in quarter_directories:
+        quarter_name = qtr_dir.split('/')[-1]
+        # Parse quarter name (e.g., "2024q2" -> year=2024, quarter=2)
+        match = re.match(r'^(\d{4})[qQ](\d)$', quarter_name)
+        if match:
+            year = int(match.group(1))
+            quarter = int(match.group(2))
+            # Convert to Period for comparison (quarter end month)
+            quarter_end_month = pd.Period(f'{year}-{quarter*3:02d}', freq='M')
+            
+            if quarter_end_month <= holdback_date:
+                train_quarter_dirs.append(qtr_dir)
+            else:
+                test_quarter_dirs.append(qtr_dir)
+    
+    print(f"\n📊 Found {len(train_quarter_dirs)} training quarters and {len(test_quarter_dirs)} test quarters")
+    
+    # Step 2: Get tags to featurize
+    df_tags_to_featurize = read_tags_to_featurize(K_top_tags=DEFAULT_K_TOP_TAGS)
+    
+    # Step 3: Featurize training data (up to 2024-06-30)
+    print(f"\n{'='*60}")
+    print("Step 1: Featurizing training data (up to 2024-06-30)...")
+    train_file = os.path.join(SAVE_DIR, 'featurized_up_to_2024q2.csv')
+    if not os.path.exists(train_file):
+        df_train_featurized = featurize_multi_qtrs(
+            train_quarter_dirs,
+            df_tags_to_featurize,
+            N_qtrs_history_comp=DEFAULT_N_QUARTERS_HISTORY_COMP,
+            save_file_name=train_file
+        )
+    else:
+        df_train_featurized = pd.read_csv(train_file)
+        print(f"📊 Training data already featurized: {df_train_featurized.shape}")
+    
+    # Step 4: Featurize test data (from 2024-07-01 onwards)
+    print(f"\n{'='*60}")
+    print("Step 2: Featurizing test data (from 2024-07-01 onwards)...")
+    test_file = os.path.join(SAVE_DIR, 'featurized_2024q3_onwards.csv')
+    if not os.path.exists(test_file):
+        df_test_featurized = featurize_multi_qtrs(
+            test_quarter_dirs,
+            df_tags_to_featurize,
+            N_qtrs_history_comp=DEFAULT_N_QUARTERS_HISTORY_COMP,
+            save_file_name=test_file
+        )
+    else:
+        df_test_featurized = pd.read_csv(test_file)
+        print(f"📊 Test data already featurized: {df_test_featurized.shape}")
+    
+    df_test_featurized = standardize_df_to_reference(df_test_featurized, df_train_featurized)  
+    print(f"📊 Test data standardized: {df_test_featurized.shape}")
+    df_test_featurized.to_csv(test_file, index=False)
+
+    return df_train_featurized, df_test_featurized
 
 
 if __name__ == "__main__": 
