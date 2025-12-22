@@ -249,7 +249,8 @@ def invest_monthly_retro_performance():
         benchmark_performance(df[(df['year_month'] > INVEST_EXP_START_MONTH_STR) 
                                & (df['year_month'] <= INVEST_EXP_END_MONTH_STR)
                                ], num_months=6)
-    
+
+
 def benchmark_performance(df_test, num_months):
     """
     Calculate benchmark performance metrics for the test dataset.
@@ -554,5 +555,6 @@ def invest_monthly_w_holdback():
 
 
 if __name__ == "__main__":
-    # invest_monthly_retro_performance() 
-    invest_monthly_w_holdback()
+    invest_monthly_retro_performance() 
+    # invest_monthly_w_holdback()
+    # invest_monthly_retro_w_contrastive(INVEST_EXP_START_MONTH_STR, INVEST_EXP_END_MONTH_STR)
