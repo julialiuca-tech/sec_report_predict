@@ -36,6 +36,7 @@ from baseline_model import (
     apply_imputation,
     filter_features_by_importance,
 )
+from utility_data import filter_companies_by_criteria
 
 
 class RegressionStockPredictor:
@@ -364,6 +365,15 @@ def main():
     # Load featurized data and stock trends
     df_features = pd.read_csv(FEATURIZED_ALL_QUARTERS_FILE)
     df_trends = pd.read_csv(STOCK_TREND_DATA_FILE)
+    
+    # Filter companies by criteria (single ticker, minimum quarters)
+    df_features, df_trends = filter_companies_by_criteria(
+        df_features, df_trends, 
+        min_quarters=4,  # At least 1 year of data
+        remove_multi_ticker=True,
+        print_summary=True
+    )
+    
     df = prep_data_feature_label(
         df_featurized_data=df_features, 
         df_stock_trend=df_trends,
@@ -539,6 +549,15 @@ def invest_monthly_retro_w_regression(INVEST_EXP_START_MONTH_STR='2023-01', INVE
     # Prepare data - Load featurized data and stock trends
     df_features = pd.read_csv(FEATURIZED_ALL_QUARTERS_FILE)
     df_trends = pd.read_csv(STOCK_TREND_DATA_FILE)
+    
+    # Filter companies by criteria (single ticker, minimum quarters)
+    df_features, df_trends = filter_companies_by_criteria(
+        df_features, df_trends, 
+        min_quarters=4,  # At least 1 year of data
+        remove_multi_ticker=True,
+        print_summary=True
+    )
+    
     df = prep_data_feature_label(df_featurized_data=df_features, 
                                   df_stock_trend=df_trends,
                                   quarters_for_gradient_comp=QUARTER_GRADIENTS)

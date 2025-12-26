@@ -39,7 +39,7 @@ from config import (
 )
 from feature_augment import compute_ratio_features, flag_outliers_by_hard_limits
 from featurize import enhance_tags_w_gradient
-from utility_data import standardize_df_to_reference
+from utility_data import standardize_df_to_reference, filter_companies_by_criteria
 from utility_binary_classifier import baseline_binary_classifier, split_train_val_by_column
 import pickle
 from config import SAVE_DIR
@@ -424,11 +424,20 @@ def main():
     # Load featurized data and stock trends
     df_features = pd.read_csv(FEATURIZED_ALL_QUARTERS_FILE)
     df_trends = pd.read_csv(STOCK_TREND_DATA_FILE)
+    
+    # Filter companies by criteria (single ticker, minimum quarters)
+    df_features, df_trends = filter_companies_by_criteria(
+        df_features, df_trends, 
+        min_quarters=4,  # At least 1 year of data
+        remove_multi_ticker=True,
+        print_summary=True
+    )
+    
     df = prep_data_feature_label(df_featurized_data=df_features, 
                                   df_stock_trend=df_trends,
                                   quarters_for_gradient_comp=QUARTER_GRADIENTS)
-    pickle_file = os.path.join(SAVE_DIR, 'df_all.pkl')
-    df.to_pickle(pickle_file)
+    # pickle_file = os.path.join(SAVE_DIR, 'df_all.pkl')
+    # df.to_pickle(pickle_file)
     print(f"📊 All data pickled: {df.shape}")
     
     # Split data into train/val sets

@@ -570,3 +570,68 @@ def standardize_df_to_reference(df, df_ref):
     return df_standardized
 
 
+def filter_companies_by_criteria(df_features, df_trends, min_quarters=4, remove_multi_ticker=True, print_summary=True):
+    """
+    Filter companies (CIKs) based on data quality criteria.
+    
+    This function applies two filters:
+    1. Remove CIKs with multiple tickers (if remove_multi_ticker=True)
+    2. Keep only CIKs with at least min_quarters of quarterly observations
+    
+    Args:
+        df_features (pd.DataFrame): Feature DataFrame with columns ['cik', 'period', ...]
+        df_trends (pd.DataFrame): Trend DataFrame with columns ['cik', 'ticker', ...]
+        min_quarters (int): Minimum number of quarterly observations required (default: 4, i.e., 1 year)
+        remove_multi_ticker (bool): Whether to remove CIKs with multiple tickers (default: True)
+        print_summary (bool): Whether to print filtering summary (default: True)
+    
+    Returns:
+        tuple: (df_features_filtered, df_trends_filtered) - Filtered DataFrames
+    """
+    df_features = df_features.copy()
+    df_trends = df_trends.copy()
+    
+    initial_feature_count = len(df_features)
+    initial_trend_count = len(df_trends)
+    initial_cik_count = df_trends['cik'].nunique()
+    
+    # Filter 1: Remove CIKs with multiple tickers
+    if remove_multi_ticker:
+        if print_summary:
+            print("\n📊 Filtering CIKs with multiple tickers...")
+        ticker_counts = df_trends.groupby('cik')['ticker'].nunique()
+        single_ticker_ciks = ticker_counts[ticker_counts == 1].index
+        df_trends = df_trends[df_trends['cik'].isin(single_ticker_ciks)].copy()
+        df_features = df_features[df_features['cik'].isin(single_ticker_ciks)].copy()
+        if print_summary:
+            removed_multi_ticker = len(ticker_counts) - len(single_ticker_ciks)
+            print(f"   After filtering: {len(single_ticker_ciks)} CIKs with single ticker")
+            print(f"   Removed {removed_multi_ticker} CIKs with multiple tickers")
+    
+    # Filter 2: Keep only CIKs with at least min_quarters of quarterly observations
+    if print_summary:
+        print(f"\n📊 Filtering CIKs with at least {min_quarters} quarterly observations...")
+    
+    # Convert period to datetime if needed
+    if df_features['period'].dtype != 'datetime64[ns]':
+        df_features['period'] = pd.to_datetime(df_features['period'], format='%Y%m%d', errors='coerce')
+    
+    # Count unique quarterly periods per CIK
+    quarterly_counts = df_features.groupby('cik')['period'].nunique()
+    sufficient_history_ciks = quarterly_counts[quarterly_counts >= min_quarters].index
+    
+    df_features = df_features[df_features['cik'].isin(sufficient_history_ciks)].copy()
+    df_trends = df_trends[df_trends['cik'].isin(sufficient_history_ciks)].copy()
+    
+    if print_summary:
+        removed_insufficient_history = len(quarterly_counts) - len(sufficient_history_ciks)
+        print(f"   After filtering: {len(sufficient_history_ciks)} CIKs with ≥{min_quarters} quarterly observations")
+        print(f"   Removed {removed_insufficient_history} CIKs with <{min_quarters} quarters")
+        print(f"\n📊 Summary:")
+        print(f"   Final CIK count: {len(sufficient_history_ciks)} (started with {initial_cik_count})")
+        print(f"   Final feature records: {len(df_features)} (started with {initial_feature_count})")
+        print(f"   Final trend records: {len(df_trends)} (started with {initial_trend_count})")
+    
+    return df_features, df_trends
+
+
