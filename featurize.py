@@ -575,7 +575,7 @@ def summarize_feature_completeness(df_features):
     by their non-null percentage. Outputs a CSV file with feature completeness rankings.
     
     Args:
-        df_features (DataFrame): Featurized dataframe from featurize_quarter_data() or featurize_multi_qtrs()
+        df_features (DataFrame): Featurized dataframe from featurize_df() or featurize_multi_qtrs()
     
     Returns:
         dict: Dictionary with 'features_ranked' key containing list of (feature, count, percentage) tuples
@@ -611,56 +611,42 @@ def summarize_feature_completeness(df_features):
     return feature_completeness_df 
 
 
-def featurize_quarter_data(data_directory, 
-                           df_tags_to_featurize, 
-                           N_qtrs_history_comp, 
-                           debug_print=DEFAULT_DEBUG_FLAG):
+def featurize_df(df_joined, 
+                 form_type,
+                 df_tags_to_featurize, 
+                 N_qtrs_history_comp, 
+                 debug_print=DEFAULT_DEBUG_FLAG):
     """
-    Top-level function to featurize quarterly SEC data for both 10-Q and 10-K forms.
+    Featurize SEC data from a joined DataFrame for a specific form type.
+    
     Args:
-        data_directory (str): Path to data directory (e.g., 'data/2022q1')
-        df_tags_to_featurize (DataFrame): DataFrame with columns ['rank', 'tag'] specifying which tags to featurize
-        N_qtrs_history_comp (int, default=4): Number of quarters to featurize
-    Returns:
-        DataFrame: Combined featurized dataframe with both 10-Q and 10-K features.
-        Single row per (cik, period) with best available feature values
-        Columns: ['cik', 'period'] + feature columns like 
-        'tag_Nqtrs_current', 'tag_Nqtrs_change_qX'
+        df_joined (pd.DataFrame): Joined SEC XBRL data DataFrame (from load_and_join_sec_xbrl_data())
+                                  Must have columns: ['cik', 'tag', 'ddate', 'qtrs', 'segments', 'uom', 
+                                  'custom_tag', 'value', 'period', 'form']
+        form_type (str): Form type to process (e.g., '10-Q' or '10-K')
+        df_tags_to_featurize (pd.DataFrame): DataFrame with columns ['rank', 'tag'] specifying which tags to featurize
+        N_qtrs_history_comp (int): Number of quarters to featurize history comparisons
+        debug_print (bool, optional): Whether to print debug information
     
-    Consolidation Logic:
-    - Form types are processed in order: ['10-Q', '10-K']
-    - First form type (10-Q) establishes the base feature dataframe
-    - Subsequent form types (10-K) only fill missing/null values in existing features 
+    Returns:
+        pd.DataFrame: Featurized dataframe for the specified form type.
+        Single row per (cik, period) with feature values
+        Columns: ['cik', 'period', 'form'] + feature columns like 
+        'tag_Nqtrs_current', 'tag_Nqtrs_change_qX'
     """
     
-    # Load data using load_and_join_sec_xbrl_data() 
-    df_joined = load_and_join_sec_xbrl_data([data_directory]) 
+    df_summary = segment_group_summary(df_joined, form_type=form_type) 
+    if len(df_summary) == 0:
+        return pd.DataFrame()
     
-    # Process both 10-Q and 10-K forms
-    form_types = ['10-Q', '10-K'] 
-    df_featurize_qtr = pd.DataFrame()
-
-    for i, form_type in enumerate(form_types): 
-         
-        df_summary = segment_group_summary(df_joined, form_type=form_type) 
-        if len(df_summary) > 0: 
-            grouped_history = history_comparisons(df_summary)
-            df_features = organize_feature_dataframe(grouped_history, df_tags_to_featurize, N_qtrs_history_comp=N_qtrs_history_comp)
-             
-            if i == 0:
-                df_featurize_qtr = df_features 
-            else:
-                df_featurize_qtr = \
-                    df_featurize_qtr.set_index(['cik', 'period']).combine_first(
-                        df_features.set_index(['cik', 'period'])
-                    ).reset_index()
-
-            if debug_print:
-                print(f"FEATURIZE_QUARTER_DATA: for {form_type} ...")
-                print(f"Getting features with shape: {df_features.shape}")
-                print(f"Consolidated with shape: {df_featurize_qtr.shape}")  
+    grouped_history = history_comparisons(df_summary)
+    df_features = organize_feature_dataframe(grouped_history, df_tags_to_featurize, N_qtrs_history_comp=N_qtrs_history_comp)
     
-    return df_featurize_qtr
+    if debug_print:
+        print(f"FEATURIZE_DF: for {form_type} ...")
+        print(f"Getting features with shape: {df_features.shape}")
+    
+    return df_features
 
 
 def featurize_multi_qtrs(data_directories, 
@@ -679,9 +665,27 @@ def featurize_multi_qtrs(data_directories,
         if os.path.exists(save_file):
             df_featurized_quarter = pd.read_csv(save_file)
         else:
-            df_featurized_quarter = featurize_quarter_data(data_directory, 
-                                                        df_tags_to_featurize, 
-                                                        N_qtrs_history_comp)
+            # Load data using load_and_join_sec_xbrl_data() 
+            df_joined = load_and_join_sec_xbrl_data([data_directory])
+            
+            # Process both 10-Q and 10-K forms
+            form_types = ['10-Q', '10-K'] 
+            df_featurized_quarter = pd.DataFrame()
+
+            for i, form_type in enumerate(form_types): 
+                df_features = featurize_df(df_joined, form_type, 
+                                         df_tags_to_featurize, 
+                                         N_qtrs_history_comp)
+                
+                if len(df_features) > 0:
+                    if i == 0:
+                        df_featurized_quarter = df_features 
+                    else:
+                        df_featurized_quarter = \
+                            df_featurized_quarter.set_index(['cik', 'period']).combine_first(
+                                df_features.set_index(['cik', 'period'])
+                            ).reset_index()
+            
             df_featurized_quarter.drop('form', axis=1, inplace=True)
             df_featurized_quarter.to_csv(save_file, index=False)
 

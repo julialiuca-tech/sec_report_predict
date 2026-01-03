@@ -570,6 +570,39 @@ def standardize_df_to_reference(df, df_ref):
     return df_standardized
 
 
+def load_sic_codes_from_raw_data(data_qtr: str) -> pd.DataFrame:
+    """
+    Load SIC codes from SEC raw data sub.txt file for a given quarter.
+    
+    Args:
+        data_qtr: Quarter string (e.g., '2025q3')
+    
+    Returns:
+        DataFrame with columns ['cik', 'sic'] or empty DataFrame if file not found
+    """
+    from config import DATA_BASE_DIR
+    
+    sub_file = os.path.join(DATA_BASE_DIR, data_qtr, 'sub.txt')
+    if not os.path.exists(sub_file):
+        return pd.DataFrame(columns=['cik', 'sic'])
+    
+    try:
+        # sub.txt is tab-delimited, columns: adsh, cik, name, sic, fye, fy, fp, form, period
+        df_sub = pd.read_csv(sub_file, sep='\t', dtype=str, low_memory=False)
+        if 'cik' in df_sub.columns and 'sic' in df_sub.columns:
+            # Get most recent SIC for each CIK (in case of multiple filings)
+            df_sub['cik'] = df_sub['cik'].str.zfill(10)
+            df_sic = df_sub[['cik', 'sic']].copy()
+            df_sic = df_sic[df_sic['sic'].notna() & (df_sic['sic'] != '')]
+            # Take most recent (last) SIC for each CIK if duplicates
+            df_sic = df_sic.drop_duplicates(subset=['cik'], keep='last')
+            return df_sic
+    except Exception:
+        pass
+    
+    return pd.DataFrame(columns=['cik', 'sic'])
+
+
 def filter_companies_by_criteria(df_features, df_trends, min_quarters=4, remove_multi_ticker=True, print_summary=True):
     """
     Filter companies (CIKs) based on data quality criteria.
@@ -633,5 +666,72 @@ def filter_companies_by_criteria(df_features, df_trends, min_quarters=4, remove_
         print(f"   Final trend records: {len(df_trends)} (started with {initial_trend_count})")
     
     return df_features, df_trends
+
+
+def main():
+    """
+    Main function to extract and save SIC codes for the most recent quarter.
+    
+    This function:
+    1. Finds the most recent quarter from the featurized data file
+    2. Loads SIC codes from SEC raw data for that quarter
+    3. Saves the (cik, sic) mapping to a CSV file for benchmarking
+    """
+    from config import SAVE_DIR, DATA_BASE_DIR
+    
+    # Find most recent quarter from featurized file
+    featurized_file = os.path.join(SAVE_DIR, 'featurized_all_quarters_upto_2025q3.csv')
+    
+    if not os.path.exists(featurized_file):
+        print(f"❌ Featurized file not found: {featurized_file}")
+        print("   Trying to find most recent quarter from SEC raw data directories...")
+        
+        # Fallback: find most recent quarter from DATA_BASE_DIR
+        if os.path.exists(DATA_BASE_DIR):
+            quarters = [d for d in os.listdir(DATA_BASE_DIR) 
+                       if os.path.isdir(os.path.join(DATA_BASE_DIR, d)) and 
+                       d[0].isdigit()]  # Filter for quarter directories (e.g., '2025q3')
+            if quarters:
+                most_recent_quarter = max(quarters)
+                print(f"   Found most recent quarter from directories: {most_recent_quarter}")
+            else:
+                print("❌ No quarter directories found in SEC raw data")
+                return
+        else:
+            print(f"❌ SEC raw data directory not found: {DATA_BASE_DIR}")
+            return
+    else:
+        # Load featurized data to find most recent quarter
+        print(f"📊 Loading featurized file to find most recent quarter...")
+        # First check if data_qtr column exists
+        sample_df = pd.read_csv(featurized_file, nrows=0)
+        if 'data_qtr' not in sample_df.columns:
+            print("❌ 'data_qtr' column not found in featurized file")
+            return
+        
+        # Read only the data_qtr column to find max
+        df_featurized = pd.read_csv(featurized_file, low_memory=False, usecols=['data_qtr'])
+        most_recent_quarter = df_featurized['data_qtr'].max()
+        print(f"   Most recent quarter: {most_recent_quarter}")
+    
+    # Load SIC codes for the most recent quarter
+    print(f"\n📊 Loading SIC codes from {most_recent_quarter}...")
+    df_sic = load_sic_codes_from_raw_data(most_recent_quarter)
+    
+    if df_sic.empty:
+        print(f"❌ No SIC codes found for quarter {most_recent_quarter}")
+        return
+    
+    # Save to CSV file
+    output_file = os.path.join(SAVE_DIR, f'sic_codes_{most_recent_quarter}.csv')
+    df_sic.to_csv(output_file, index=False)
+    
+    print(f"\n✅ Saved {len(df_sic):,} (CIK, SIC) mappings to {output_file}")
+    print(f"   Unique CIKs: {df_sic['cik'].nunique():,}")
+    print(f"   Unique SIC codes: {df_sic['sic'].nunique():,}")
+
+
+if __name__ == "__main__":
+    main()
 
 

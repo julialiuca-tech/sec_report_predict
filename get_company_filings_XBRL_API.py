@@ -175,7 +175,7 @@ class SECCompanyFilings:
         raise ValueError(f"Ticker {ticker} not found in SEC database")
     
     def get_company_info(self) -> Dict:
-        """Get basic company information including ticker."""
+        """Get basic company information including ticker and SIC code."""
         url = f"{self.BASE_URL}/submissions/CIK{self.cik}.json"
         headers = {'User-Agent': self.user_agent}
         
@@ -189,10 +189,20 @@ class SECCompanyFilings:
         if not hasattr(self, 'ticker') or not self.ticker:
             self.ticker = ticker
         
+        # Get SIC code - it's at the top level of the API response
+        sic = data.get('sic')
+        # Convert to int if it's a valid numeric string, otherwise keep as None
+        if sic is not None:
+            try:
+                sic = int(sic) if str(sic).strip() and str(sic) != 'None' else None
+            except (ValueError, TypeError):
+                sic = None
+        
         return {
             'cik': self.cik,
             'name': data.get('name', ''),
             'ticker': ticker,
+            'sic': sic
         }
     
     def get_company_facts(self) -> Dict:
@@ -754,11 +764,14 @@ if __name__ == "__main__":
 
 
 # spot check code, for reference only 
-from spotcheck_tag_synonyms import find_10q_reports, get_company_ciks, get_cik_ticker_mapping
-from utility_data import load_and_join_sec_xbrl_data
-from config import DATA_BASE_DIR
-import os
 def spot_check_xbrl_and_bulk_data_match():
+    """
+    Spot check function for reference only.
+    Imports are done inside function to avoid import errors when module is imported.
+    """
+    from spotcheck_tag_synonyms import find_10q_reports
+    from utility_data import load_and_join_sec_xbrl_data, get_cik_ticker_mapping
+    from config import DATA_BASE_DIR
     # pre-requisite: python get_company_filings_XBRL_API.py --ticker MSFT --form 10-Q --target-date 2025-04-30
     # this saves a file called MSFT_10-Q_20250430_bulk_schema.csv
     df_xbrl = pd.read_csv('../MSFT_10-Q_20250331_bulk_schema.csv')
