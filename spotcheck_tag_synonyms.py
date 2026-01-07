@@ -11,6 +11,7 @@ Uses financial domain language models for semantic similarity matching.
 import pandas as pd
 from utility_data import load_and_join_sec_xbrl_data, get_cik_ticker_mapping
 from config import DATA_BASE_DIR
+from config_metrics import KEY_METRICS
 import os
 import re
 from typing import Set, Tuple, Dict, List, Optional
@@ -60,28 +61,6 @@ SIMILARITY_THRESHOLD = 0.9
 
 # Quarter directory to check (e.g., '2025q2')
 QUARTER_DIR = '2025q2'
-
-KEY_METRICS = [
-    'AccountsReceivableNetCurrent',
-    'Assets',
-    'AssetsCurrent',
-    'CashAndCashEquivalentsAtCarryingValue',
-    'CommonStockSharesOutstanding',  # For per-share metrics
-    'CostOfGoodsAndServicesSold',
-    'DepreciationDepletionAndAmortization',
-    'GrossProfit',
-    'InterestExpense',
-    'InventoryNet',
-    'LiabilitiesCurrent',
-    'LongTermDebtNoncurrent',
-    'NetCashProvidedByUsedInOperatingActivities',
-    'NetIncomeLoss',
-    'OperatingIncomeLoss',
-    'PaymentsToAcquirePropertyPlantAndEquipment',
-    'Revenues',
-    'RevenueFromContractWithCustomerExcludingAssessedTax',   
-    'StockholdersEquity'
-]
 
 
 PICKLE_FILE = 'metric_all_matches.pkl'

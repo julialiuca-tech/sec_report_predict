@@ -121,31 +121,61 @@ def segment_group_summary(df_joined, form_type, debug_print=DEFAULT_DEBUG_FLAG):
             f"single_segment_groups ({len(single_segment_groups)}) != " \
             f"single_segment_records ({len(single_segment_records)})"
     
-    # Strategy 2: For rows with 'only_1_segment' being False but has_segment_null, 
-    # join df_filtered (filtered for segments==NULL records) and segment_group
+    # Strategy 2: For rows with 'only_1_segment' being False but has_segment_null,
+    # prefer records WITH segments over null-segment records (use max value)
     multi_segment_with_null = segment_group[
         (segment_group['only_1_segment'] == False) & 
         (segment_group['has_segment_null'] == True)
     ]
     if len(multi_segment_with_null) > 0:
-        # Filter df_filtered for records with segments==NULL
-        null_segment_records = df_filtered[df_filtered['segments'].isna()].copy()
-        # Join with segment_group to get the summary records
-        null_summary_records = multi_segment_with_null.merge(
-            null_segment_records,
+        # Get all records for these groups
+        all_multi_segment_records = df_filtered.merge(
+            multi_segment_with_null[['cik', 'tag', 'ddate', 'qtrs', 'period', 'form']],
             on=['cik', 'tag', 'ddate', 'qtrs', 'period', 'form'],
-            how='left'
+            how='inner'
         )
-        # Add summary metadata
-        null_summary_records['summary_flag'] = 1
-        null_summary_records['summary_reason'] = 'segments_null'
-        summary_records.append(null_summary_records)
         
-        # Assertion: multi_segment_with_null and null_summary_records should have the same length
-        assert len(multi_segment_with_null) == len(null_summary_records), \
-            f"Length mismatch in Strategy 2: " \
-            f"multi_segment_with_null ({len(multi_segment_with_null)}) != " \
-            f"null_summary_records ({len(null_summary_records)})"
+        # Separate records with segments vs null segments
+        records_with_segments = all_multi_segment_records[
+            all_multi_segment_records['segments'].notna()
+        ].copy()
+        records_with_null_segments = all_multi_segment_records[
+            all_multi_segment_records['segments'].isna()
+        ].copy()
+        
+        # Group by key and select records to use
+        selected_records = []
+        
+        for group_key, group in all_multi_segment_records.groupby(
+            ['cik', 'tag', 'ddate', 'qtrs', 'period', 'form']
+        ):
+            # Check if this group has records with segments
+            group_with_segments = group[group['segments'].notna()]
+            
+            if not group_with_segments.empty:
+                # Prefer records WITH segments - use max value
+                max_idx = group_with_segments['value'].idxmax()
+                max_record = group_with_segments.loc[max_idx].copy()
+                max_record['summary_flag'] = 1
+                max_record['summary_reason'] = 'segments_preferred_max'
+                selected_records.append(max_record)
+            else:
+                # Fall back to null-segment records if that's the only option
+                null_record = group[group['segments'].isna()].iloc[0].copy()
+                null_record['summary_flag'] = 1
+                null_record['summary_reason'] = 'segments_null_fallback'
+                selected_records.append(null_record)
+        
+        if selected_records:
+            # Convert list of Series to DataFrame
+            selected_df = pd.DataFrame(selected_records)
+            summary_records.append(selected_df)
+            
+            # Assertion: should have same number of groups as input
+            assert len(multi_segment_with_null) == len(selected_records), \
+                f"Length mismatch in Strategy 2: " \
+                f"multi_segment_with_null ({len(multi_segment_with_null)}) != " \
+                f"selected_records ({len(selected_records)})"
     
     # Strategy 3: Only process records that need line-by-line copy 
     # These are groups with multiple segments and no null segments
@@ -193,7 +223,8 @@ def segment_group_summary(df_joined, form_type, debug_print=DEFAULT_DEBUG_FLAG):
         print(f"Total summary records created: {len(df_summary):,}")
         print(f"Summary records by reason:")
         print(f"  - Single record: {len(df_summary[df_summary['summary_reason'] == 'single_record']):,}")
-        print(f"  - Segments null: {len(df_summary[df_summary['summary_reason'] == 'segments_null']):,}")
+        print(f"  - Segments preferred (max): {len(df_summary[df_summary['summary_reason'] == 'segments_preferred_max']):,}")
+        print(f"  - Segments null (fallback): {len(df_summary[df_summary['summary_reason'] == 'segments_null_fallback']):,}")
         print(f"  - Max value: {len(df_summary[df_summary['summary_reason'] == 'max_value']):,}")
 
     return df_summary
@@ -664,6 +695,11 @@ def featurize_multi_qtrs(data_directories,
         save_file = os.path.join(save_dir, QUARTER_FEATURIZED_PATTERN.format(quarter_name))
         if os.path.exists(save_file):
             df_featurized_quarter = pd.read_csv(save_file)
+            # Handle legacy files that don't have 'form' column
+            if 'form' not in df_featurized_quarter.columns:
+                if debug_print:
+                    print(f"⚠️  Warning: {save_file} does not have 'form' column. Adding default 'Unknown'.")
+                df_featurized_quarter['form'] = 'Unknown'
         else:
             # Load data using load_and_join_sec_xbrl_data() 
             df_joined = load_and_join_sec_xbrl_data([data_directory])
@@ -681,12 +717,13 @@ def featurize_multi_qtrs(data_directories,
                     if i == 0:
                         df_featurized_quarter = df_features 
                     else:
+                        # Combine dataframes, keeping form in index to preserve form_type information
                         df_featurized_quarter = \
-                            df_featurized_quarter.set_index(['cik', 'period']).combine_first(
-                                df_features.set_index(['cik', 'period'])
+                            df_featurized_quarter.set_index(['cik', 'period', 'form']).combine_first(
+                                df_features.set_index(['cik', 'period', 'form'])
                             ).reset_index()
             
-            df_featurized_quarter.drop('form', axis=1, inplace=True)
+            # Keep 'form' column in the output - do not drop it
             df_featurized_quarter.to_csv(save_file, index=False)
 
         print(f"Featurized {data_directory} with shape: {df_featurized_quarter.shape}")
@@ -695,9 +732,10 @@ def featurize_multi_qtrs(data_directories,
         if i_dir == 0:
             df_featurized_all_quarters = df_featurized_quarter.copy()
         else:
+            # Include 'form' in the index to preserve form_type when combining quarters
             df_featurized_all_quarters = \
-                df_featurized_all_quarters.set_index(['cik', 'period', 'data_qtr']).combine_first(
-                    df_featurized_quarter.set_index(['cik', 'period', 'data_qtr'])
+                df_featurized_all_quarters.set_index(['cik', 'period', 'form', 'data_qtr']).combine_first(
+                    df_featurized_quarter.set_index(['cik', 'period', 'form', 'data_qtr'])
                 ).reset_index()
 
     df_featurized_all_quarters.to_csv(os.path.join(save_dir, save_file_name), index=False)

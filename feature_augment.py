@@ -111,6 +111,26 @@ def _find_feature_column(df: pd.DataFrame, tag: str, qtrs: int, suffix: str = '_
     return None
 
 
+def _find_feature_column_flexible(df: pd.DataFrame, tag: str, suffix: str = '_current') -> Optional[str]:
+    """
+    Find a feature column for a tag by trying common qtrs values (1, 0).
+    
+    Args:
+        df: DataFrame with feature columns
+        tag: Tag name (e.g., 'GrossProfit', 'Revenues')
+        suffix: Column suffix (default: '_current')
+    
+    Returns:
+        Column name if found, None otherwise
+    """
+    # Try common qtrs values in order of likelihood (1qtrs for quarterly, 0qtrs for point-in-time)
+    for qtrs in [1, 0]:
+        col = _find_feature_column(df, tag, qtrs, suffix)
+        if col:
+            return col
+    return None
+
+
 def _safe_divide(numerator: pd.Series, denominator: pd.Series, fill_value: np.float64 = np.nan) -> pd.Series:
     """
     Safely divide two series, handling division by zero and missing values.
@@ -354,6 +374,104 @@ def compute_ratio_features(df: pd.DataFrame, debug_print: bool = False) -> pd.Da
                 sample_str = ", ".join([f"{v:.4f}" for v in sample_vals])
                 print(f"      Mean: {mean_val:.4f}, Median: {median_val:.4f}, Std: {std_val:.4f}")
                 print(f"      Sample: [{sample_str}]")
+    
+    return df_result
+
+
+def compute_ratio_features_on_ratio_definitions(df: pd.DataFrame, ratio_definitions: dict, 
+                                                  debug_print: bool = False) -> pd.DataFrame:
+    """
+    Compute ratio features dynamically from ratio definitions.
+    
+    This function takes a ratio_definitions dictionary and computes ratios accordingly.
+    Unlike compute_ratio_features(), this function is not hard-wired and can handle
+    any ratio definitions provided.
+    
+    Args:
+        df: Featurized dataframe with columns like 'TagName_qtrs_current'
+        ratio_definitions: Dictionary mapping ratio names to (numerator, denominator) tuples
+                         where numerator can be a single tag string or tuple of tag strings,
+                         and denominator is a single tag string
+                         Example: {'GrossMargin': ('GrossProfit', 'Revenues'),
+                                  'QuickRatio': (('AssetsCurrent', 'InventoryNet'), 'LiabilitiesCurrent')}
+        debug_print: If True, print debug information about missing features
+    
+    Returns:
+        DataFrame with original columns plus new ratio features (suffixed with '_augment')
+    """
+    df_result = df.copy()
+    
+    if debug_print:
+        print("=" * 80)
+        print("COMPUTING RATIO FEATURES FROM RATIO DEFINITIONS (AUGMENTED)")
+        print("=" * 80)
+        print(f"Input dataframe shape: {df_result.shape}")
+        print(f"Number of ratios to compute: {len(ratio_definitions)}")
+    
+    ratios_computed = []
+    ratios_skipped = []
+    
+    for ratio_name, (num_component, denom_component) in ratio_definitions.items():
+        # Find denominator column
+        denom_col = _find_feature_column_flexible(df_result, denom_component)
+        if not denom_col:
+            if debug_print:
+                print(f"  ⚠️  Skipping {ratio_name}: denominator '{denom_component}' not found")
+            ratios_skipped.append(ratio_name)
+            continue
+        
+        # Handle numerator component (can be single tag or tuple)
+        if isinstance(num_component, tuple):
+            # Tuple numerator (e.g., QuickRatio: (AssetsCurrent - InventoryNet))
+            num_cols = []
+            for comp_tag in num_component:
+                comp_col = _find_feature_column_flexible(df_result, comp_tag)
+                if not comp_col:
+                    if debug_print:
+                        print(f"  ⚠️  Skipping {ratio_name}: numerator component '{comp_tag}' not found")
+                    ratios_skipped.append(ratio_name)
+                    break
+                num_cols.append(comp_col)
+            else:
+                # All numerator components found, compute numerator
+                if len(num_cols) == 1:
+                    numerator = df_result[num_cols[0]]
+                else:
+                    # Multiple components: subtract them (e.g., AssetsCurrent - InventoryNet)
+                    numerator = df_result[num_cols[0]]
+                    for col in num_cols[1:]:
+                        numerator = numerator - df_result[col]
+                
+                # Compute ratio
+                ratio_col_name = f'{ratio_name}_augment'
+                df_result[ratio_col_name] = _safe_divide(numerator, df_result[denom_col])
+                ratios_computed.append(ratio_name)
+        else:
+            # Single numerator component
+            num_col = _find_feature_column_flexible(df_result, num_component)
+            if not num_col:
+                if debug_print:
+                    print(f"  ⚠️  Skipping {ratio_name}: numerator '{num_component}' not found")
+                ratios_skipped.append(ratio_name)
+                continue
+            
+            # Compute ratio
+            ratio_col_name = f'{ratio_name}_augment'
+            df_result[ratio_col_name] = _safe_divide(df_result[num_col], df_result[denom_col])
+            ratios_computed.append(ratio_name)
+    
+    # Count augmented features created
+    augment_features = [col for col in df_result.columns if col.endswith('_augment')]
+    
+    if debug_print:
+        print(f"\n✅ Computed {len(ratios_computed)} ratios successfully")
+        if ratios_skipped:
+            print(f"⚠️  Skipped {len(ratios_skipped)} ratios due to missing components")
+        print(f"Output dataframe shape: {df_result.shape}")
+        print(f"\n📋 Ratio computation summary:")
+        print(f"  - Computed: {', '.join(ratios_computed)}")
+        if ratios_skipped:
+            print(f"  - Skipped: {', '.join(ratios_skipped)}")
     
     return df_result
 
