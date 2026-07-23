@@ -263,7 +263,6 @@ def download_all_sec_datasets():
         return False
     
     # Sort datasets by recency (most recent first)
-    print(f"\nSorting {len(dataset_urls)} datasets by recency...")
     dataset_urls = sort_datasets_by_recency(dataset_urls)
     
     # Track progress

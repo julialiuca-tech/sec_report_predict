@@ -51,7 +51,7 @@ COMPANY_TICKERS_EXCHANGE_FILE = os.path.join(DATA_DIR, 'company_tickers_exchange
 # Default parameters for featurization
 DEFAULT_K_TOP_TAGS = 250
 DEFAULT_MIN_COMPLETENESS = 15.0
-DEFAULT_DEBUG_FLAG = True
+DEFAULT_DEBUG_FLAG = False
 DEFAULT_N_QUARTERS_HISTORY_COMP = 0  # 0 means no history comparisons, 4 for past 1 year comparison
 
 
