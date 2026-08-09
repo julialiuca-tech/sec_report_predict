@@ -341,7 +341,16 @@ def history_comparisons(df, debug_print=DEFAULT_DEBUG_FLAG):
     # Validate and fix potential date typos before conversion
     df_work = validate_and_fix_dates(df_work, 'ddate', debug_print)
     
-    df_work['ddate'] = pd.to_datetime(df_work['ddate'], format='%Y%m%d')
+    # SEC filings occasionally contain corrupt ddates (e.g. 10111231) that are
+    # outside pandas Timestamp bounds. Coerce those to NaT and drop them.
+    df_work['ddate'] = pd.to_datetime(df_work['ddate'], format='%Y%m%d', errors='coerce')
+    bad_ddate_mask = df_work['ddate'].isna()
+    if bad_ddate_mask.any():
+        n_bad = int(bad_ddate_mask.sum())
+        print(f"⚠️  Dropping {n_bad:,} rows with invalid/out-of-bounds ddate values")
+        df_work = df_work.loc[~bad_ddate_mask].copy()
+        if df_work.empty:
+            return pd.DataFrame()
     
     # Group by ['cik', 'name', 'tag', 'segments', 'qtrs'] and aggregate
     def aggregate_historical_data(group):

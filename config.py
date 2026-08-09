@@ -20,8 +20,10 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 # Data directories
 DATA_DIR = os.path.join(PROJECT_ROOT, 'data')
-SAVE_DIR = os.path.join(DATA_DIR, 'featurized_2015_to_2025')
-DATA_BASE_DIR = os.path.join(DATA_DIR, 'SEC_raw_2015_to_2025')
+SAVE_DIR = os.path.join(DATA_DIR, 'featurized_since_2011')
+DATA_BASE_DIR = os.path.join(DATA_DIR, 'SEC_raw_since_2011')
+# NOTE: SEC raw data is only available since 2009, and 
+# become reliable after 2011
 
 # stock data 
 STOCK_DIR = os.path.join(DATA_DIR, 'stock_Stooq_daily_US', 'derived_data')
@@ -43,6 +45,7 @@ QUARTER_FEATURIZED_PATTERN = os.path.join(SAVE_DIR, '{}_featurized.csv')  # Form
 
 # SEC data files
 COMPANY_TICKERS_EXCHANGE_FILE = os.path.join(DATA_DIR, 'company_tickers_exchange.json')
+SEC_TABLE_W_FILE_DATE_FILE = os.path.join(DATA_DIR, 'sec_table_w_file_date.csv')
 
 # =============================================================================
 # FEATURIZATION PARAMETERS

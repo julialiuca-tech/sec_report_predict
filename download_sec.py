@@ -3,9 +3,9 @@
 Enhanced script to discover and download ALL available SEC financial statement datasets.
 
 This script:
-1. Scrapes the SEC server to discover all available datasets
-2. Downloads and extracts all discovered datasets
-3. Provides progress tracking and error handling
+1. Builds quarterly dataset candidates from 2011q1 through the current calendar quarter
+2. Confirms which datasets are published on sec.gov
+3. Downloads and extracts all available datasets
 4. Skips already downloaded datasets
 
 Created on Fri Aug 12 10:19:50 2024
@@ -18,7 +18,7 @@ Enhanced by: AI Assistant
 import requests
 import zipfile
 import os
-import re
+from datetime import date
 from io import BytesIO
 from urllib.parse import urljoin, urlparse
 import time
@@ -26,99 +26,106 @@ from pathlib import Path
 
 from config import DATA_BASE_DIR
 
-def get_available_datasets(base_url="https://www.sec.gov/files/dera/data/financial-statement-data-sets/"):
+SEC_DATASETS_BASE_URL = "https://www.sec.gov/files/dera/data/financial-statement-data-sets/"
+SEC_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36 (Contact: your-email@example.com)'
+}
+# Pre-2011 filings are sparse/unreliable while companies adopted the mandatory format.
+SEC_DATA_START_YEAR = 2011
+
+
+def iter_quarter_labels(start_year=SEC_DATA_START_YEAR, end_date=None):
     """
-    Scrapes the SEC server to discover all available dataset files
-    
+    Yield quarterly dataset labels from start_year q1 through the current calendar quarter.
+
+    Parameters
+    ----------
+    start_year : int
+        First year to include (default 2011; earlier SEC datasets are less dependable).
+    end_date : date, optional
+        Reference date for the newest calendar quarter. Defaults to today.
+
+    Yields
+    ------
+    str
+        Dataset labels such as '2011q1', '2026q1'.
+    """
+    if end_date is None:
+        end_date = date.today()
+
+    end_year = end_date.year
+    end_quarter = (end_date.month - 1) // 3 + 1
+
+    for year in range(start_year, end_year + 1):
+        last_quarter = end_quarter if year == end_year else 4
+        for quarter in range(1, last_quarter + 1):
+            yield f"{year}q{quarter}"
+
+
+def url_exists(url, headers=None, timeout=30):
+    """Return True if the remote URL responds with HTTP 200."""
+    if headers is None:
+        headers = SEC_HEADERS
+    try:
+        response = requests.head(url, headers=headers, timeout=timeout, allow_redirects=True)
+        if response.status_code == 200:
+            return True
+        # Some servers reject HEAD; fall back to a ranged GET.
+        if response.status_code in (403, 405):
+            response = requests.get(
+                url, headers=headers, timeout=timeout, stream=True, allow_redirects=True
+            )
+            exists = response.status_code == 200
+            response.close()
+            return exists
+        return False
+    except requests.RequestException:
+        return False
+
+
+def get_available_datasets(base_url=SEC_DATASETS_BASE_URL, start_year=SEC_DATA_START_YEAR):
+    """
+    Discover available SEC quarterly datasets from start_year through the newest published quarter.
+
+    The SEC directory listing is often unavailable, so this builds candidate quarterly URLs
+    (2011q1 .. current calendar quarter) and keeps those that exist on the server.
+
     Parameters
     ----------
     base_url : str
         Base URL of the SEC financial statement datasets
-        
+    start_year : int
+        First year to include
+
     Returns
     -------
     list
         List of discovered dataset URLs
     """
     print(f"Discovering available datasets from {base_url}...")
-    
-    # Define headers with a User-Agent (required by SEC)
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36 (Contact: your-email@example.com)'
-    }
-    
-    try:
-        # Get the main page content
-        response = requests.get(base_url, headers=headers)
-        response.raise_for_status()
-        
-        # Look for ZIP files in the HTML content
-        content = response.text
-        
-        # Pattern to match ZIP files (quarterly and annual datasets)
-        # This pattern looks for links ending in .zip
-        zip_pattern = r'href=["\']([^"\']*\.zip)["\']'
-        zip_files = re.findall(zip_pattern, content)
-        
-        # Also look for direct file listings if the page structure is different
-        # Some servers list files directly
-        if not zip_files:
-            # Alternative pattern for file listings
-            file_pattern = r'([0-9]{4}q[1-4]\.zip)|([0-9]{4}\.zip)'
-            file_matches = re.findall(file_pattern, content)
-            zip_files = [match[0] if match[0] else match[1] for match in file_matches if any(match)]
-        
-        # Convert relative URLs to absolute URLs
-        dataset_urls = []
-        for zip_file in zip_files:
-            if zip_file.startswith('http'):
-                dataset_urls.append(zip_file)
-            else:
-                dataset_urls.append(urljoin(base_url, zip_file))
-        
-        # Remove duplicates and sort
-        dataset_urls = sorted(list(set(dataset_urls)))
-        
-        print(f"Discovered {len(dataset_urls)} datasets:")
-        for url in dataset_urls:
-            print(f"  - {url}")
-            
-        return dataset_urls
-        
-    except requests.RequestException as e:
-        print(f"Error discovering datasets: {e}")
-        print("Falling back to known dataset list...")
-        return get_fallback_datasets()
+    print(f"Scanning quarterly datasets from {start_year}q1 through the current quarter...")
 
-def get_fallback_datasets():
-    """
-    Fallback method that returns a comprehensive list of known SEC datasets
-    based on typical naming patterns and available years
-    
-    Returns
-    -------
-    list
-        List of known dataset URLs
-    """
-    base_url = "https://www.sec.gov/files/dera/data/financial-statement-data-sets/"
-    
-    # Generate URLs for common patterns
-    datasets = []
-    
-    # Quarterly datasets (2009-2024)
-    for year in range(2024, 2026):
-        for quarter in range(1, 5):
-            # # Skip future quarters
-            # if year == 2024 and quarter > 2:  # As of 2024, Q3 and Q4 might not be available yet
-            #     continue
-            datasets.append(f"{base_url}{year}q{quarter}.zip")
-    
-    # Annual datasets (if they exist)
-    for year in range(2024, 2026):
-        datasets.append(f"{base_url}{year}.zip")
-    
-    print(f"Using fallback list with {len(datasets)} potential datasets")
-    return datasets
+    candidates = [urljoin(base_url, f"{label}.zip") for label in iter_quarter_labels(start_year)]
+    dataset_urls = []
+
+    for i, url in enumerate(candidates, 1):
+        label = get_dataset_name_from_url(url)
+        if url_exists(url):
+            dataset_urls.append(url)
+            print(f"  [{i}/{len(candidates)}] {label}: available")
+        else:
+            print(f"  [{i}/{len(candidates)}] {label}: not published yet / missing")
+        # Be polite to sec.gov while probing.
+        time.sleep(0.2)
+
+    if not dataset_urls:
+        print("No datasets confirmed via HEAD checks. Falling back to candidate URL list...")
+        return candidates
+
+    print(f"Discovered {len(dataset_urls)} available quarterly datasets "
+          f"({get_dataset_name_from_url(dataset_urls[0])} .. "
+          f"{get_dataset_name_from_url(dataset_urls[-1])}).")
+    return dataset_urls
 
 def download_and_unzip(url, extract_to='.', max_retries=3):
     """
@@ -138,14 +145,10 @@ def download_and_unzip(url, extract_to='.', max_retries=3):
     bool
         True if successful, False otherwise.
     """
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36 (Contact: your-email@example.com)'
-    }
-    
     for attempt in range(max_retries):
         try:
             print(f"Downloading ZIP file from {url} (attempt {attempt + 1}/{max_retries})...")
-            response = requests.get(url, headers=headers, timeout=300)  # 5 minute timeout
+            response = requests.get(url, headers=SEC_HEADERS, timeout=300)  # 5 minute timeout
             
             # Check if file exists (404 means file doesn't exist)
             if response.status_code == 404:
@@ -231,14 +234,16 @@ def sort_datasets_by_recency(dataset_urls):
     
     # Sort by recency (most recent first)
     sorted_datasets = sorted(dataset_urls, key=get_sort_key, reverse=True)
-    
-    print("Datasets sorted by recency (most recent first):")
-    for i, url in enumerate(sorted_datasets[:10], 1):  # Show first 10
+
+    print(f"Datasets sorted by recency (most recent first), {len(sorted_datasets)} total:")
+    preview = 10
+    for i, url in enumerate(sorted_datasets[:preview], 1):
         dataset_name = get_dataset_name_from_url(url)
         print(f"  {i:2d}. {dataset_name}")
-    if len(sorted_datasets) > 10:
-        print(f"  ... and {len(sorted_datasets) - 10} more datasets")
-    
+    if len(sorted_datasets) > preview:
+        oldest = get_dataset_name_from_url(sorted_datasets[-1])
+        print(f"  ... and {len(sorted_datasets) - preview} older datasets through {oldest}")
+
     return sorted_datasets
 
 def download_all_sec_datasets():
