@@ -3,7 +3,7 @@ import numpy as np
 import requests
 import os
 import json
-from config import DATA_DIR, STOCK_DIR, MODEL_DIR
+from config import DATA_DIR, DATA_BASE_DIR, STOCK_DIR, MODEL_DIR, SEC_TABLE_W_FILE_DATE_FILE
 
 
 def clean_cik_dup_submissions(submissions):
@@ -93,6 +93,94 @@ def load_and_join_sec_xbrl_data(data_dir):
     print(f"Total unique companies (CIK): {df_joined['cik'].nunique():,}")
     
     return df_joined
+
+
+def build_sec_table_w_file_date(
+    data_base_dir=None,
+    form_types=('10-K', '10-Q'),
+    output_file=None,
+):
+    """
+    Build a compact SEC filing index with EDGAR submission dates.
+
+    Scans quarterly ``sub.txt`` files under ``data_base_dir`` and returns one row
+    per (cik, period, form_type) with the filing date. Use this table for as-of
+    joins against event dates (e.g. stock trend rows): for each (cik, date),
+    take the row with the latest ``file_date`` where ``file_date <= date``.
+
+    Parameters
+    ----------
+    data_base_dir : str or Path, optional
+        Root directory of SEC quarterly folders. Defaults to ``DATA_BASE_DIR``.
+    form_types : sequence of str, optional
+        Form types to keep. Defaults to ``('10-K', '10-Q')``.
+    output_file : str or Path, optional
+        CSV path to write. Defaults to ``SEC_TABLE_W_FILE_DATE_FILE``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``cik`` (int), ``period`` (int YYYYMMDD fiscal period end),
+        ``form_type`` (str), ``file_date`` (datetime64[ns], EDGAR ``filed`` date).
+        Sorted by ``cik``, ``file_date``. If the same (cik, period, form_type)
+        appears more than once, the latest ``file_date`` is kept.
+    """
+    if data_base_dir is None:
+        data_base_dir = DATA_BASE_DIR
+    if output_file is None:
+        output_file = SEC_TABLE_W_FILE_DATE_FILE
+
+    empty_df = pd.DataFrame(columns=['cik', 'period', 'form_type', 'file_date'])
+
+    quarter_dirs = sorted(
+        entry.path
+        for entry in os.scandir(data_base_dir)
+        if entry.is_dir() and os.path.exists(os.path.join(entry.path, 'sub.txt'))
+    )
+    if not quarter_dirs:
+        df = empty_df
+    else:
+        frames = []
+        for crt_dir in quarter_dirs:
+            sub_path = os.path.join(crt_dir, 'sub.txt')
+            submissions = pd.read_csv(
+                sub_path,
+                sep='\t',
+                usecols=['cik', 'form', 'period', 'filed'],
+                dtype={'cik': 'Int64', 'form': str, 'period': str, 'filed': str},
+                low_memory=False,
+                keep_default_na=False,
+            )
+            submissions = submissions[submissions['form'].isin(form_types)]
+            if submissions.empty:
+                continue
+            frames.append(submissions)
+
+        if not frames:
+            df = empty_df
+        else:
+            df = pd.concat(frames, ignore_index=True)
+            df = df.rename(columns={'form': 'form_type', 'filed': 'file_date'})
+
+            df['period'] = pd.to_numeric(df['period'], errors='coerce')
+            df['file_date'] = pd.to_datetime(df['file_date'], format='%Y%m%d', errors='coerce')
+            df = df.dropna(subset=['cik', 'period', 'form_type', 'file_date'])
+            df['cik'] = df['cik'].astype(int)
+            df['period'] = df['period'].astype(int)
+
+            # Prefer the most recently filed copy when duplicates exist.
+            df = (
+                df.sort_values('file_date')
+                .drop_duplicates(subset=['cik', 'period', 'form_type'], keep='last')
+                .sort_values(['cik', 'file_date'])
+                .reset_index(drop=True)
+            )
+            df = df[['cik', 'period', 'form_type', 'file_date']]
+
+    os.makedirs(os.path.dirname(output_file) or '.', exist_ok=True)
+    df.to_csv(output_file, index=False)
+    print(f"Saved SEC file-date table ({len(df):,} rows) to: {output_file}")
+    return df
 
 
 def top_tags(df_joined):
@@ -733,5 +821,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # build_sec_table_w_file_date()
 
 
