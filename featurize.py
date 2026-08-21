@@ -121,8 +121,8 @@ def segment_group_summary(df_joined, form_type, debug_print=DEFAULT_DEBUG_FLAG):
             f"single_segment_groups ({len(single_segment_groups)}) != " \
             f"single_segment_records ({len(single_segment_records)})"
     
-    # Strategy 2: For rows with 'only_1_segment' being False but has_segment_null,
-    # prefer records WITH segments over null-segment records (use max value)
+    # Strategy 2: Multiple records including a segments=NaN company-level summary —
+    # prefer the null-segment row (matches SEC total; segment breakdowns are partial).
     multi_segment_with_null = segment_group[
         (segment_group['only_1_segment'] == False) & 
         (segment_group['has_segment_null'] == True)
@@ -135,36 +135,25 @@ def segment_group_summary(df_joined, form_type, debug_print=DEFAULT_DEBUG_FLAG):
             how='inner'
         )
         
-        # Separate records with segments vs null segments
-        records_with_segments = all_multi_segment_records[
-            all_multi_segment_records['segments'].notna()
-        ].copy()
-        records_with_null_segments = all_multi_segment_records[
-            all_multi_segment_records['segments'].isna()
-        ].copy()
-        
-        # Group by key and select records to use
         selected_records = []
         
         for group_key, group in all_multi_segment_records.groupby(
             ['cik', 'tag', 'ddate', 'qtrs', 'period', 'form']
         ):
-            # Check if this group has records with segments
-            group_with_segments = group[group['segments'].notna()]
-            
-            if not group_with_segments.empty:
-                # Prefer records WITH segments - use max value
-                max_idx = group_with_segments['value'].idxmax()
-                max_record = group_with_segments.loc[max_idx].copy()
-                max_record['summary_flag'] = 1
-                max_record['summary_reason'] = 'segments_preferred_max'
-                selected_records.append(max_record)
-            else:
-                # Fall back to null-segment records if that's the only option
-                null_record = group[group['segments'].isna()].iloc[0].copy()
+            null_segment_rows = group[group['segments'].isna()]
+            if not null_segment_rows.empty:
+                # Prefer company-level summary (segments=NaN)
+                null_record = null_segment_rows.iloc[0].copy()
                 null_record['summary_flag'] = 1
-                null_record['summary_reason'] = 'segments_null_fallback'
+                null_record['summary_reason'] = 'segments_null_summary'
                 selected_records.append(null_record)
+            else:
+                # Should not happen given has_segment_null filter; keep a safe fallback
+                max_idx = group['value'].idxmax()
+                max_record = group.loc[max_idx].copy()
+                max_record['summary_flag'] = 1
+                max_record['summary_reason'] = 'max_value_fallback'
+                selected_records.append(max_record)
         
         if selected_records:
             # Convert list of Series to DataFrame
@@ -223,9 +212,9 @@ def segment_group_summary(df_joined, form_type, debug_print=DEFAULT_DEBUG_FLAG):
         print(f"Total summary records created: {len(df_summary):,}")
         print(f"Summary records by reason:")
         print(f"  - Single record: {len(df_summary[df_summary['summary_reason'] == 'single_record']):,}")
-        print(f"  - Segments preferred (max): {len(df_summary[df_summary['summary_reason'] == 'segments_preferred_max']):,}")
-        print(f"  - Segments null (fallback): {len(df_summary[df_summary['summary_reason'] == 'segments_null_fallback']):,}")
-        print(f"  - Max value: {len(df_summary[df_summary['summary_reason'] == 'max_value']):,}")
+        print(f"  - Segments null (summary): {len(df_summary[df_summary['summary_reason'] == 'segments_null_summary']):,}")
+        print(f"  - Max value fallback: {len(df_summary[df_summary['summary_reason'] == 'max_value_fallback']):,}")
+        print(f"  - Max value (no null segment): {len(df_summary[df_summary['summary_reason'] == 'max_value']):,}")
 
     return df_summary
 
@@ -283,22 +272,12 @@ def validate_and_fix_dates(df, date_column, debug_print=False):
     # Apply date fixing
     df_work[date_column] = df_work[date_column].apply(fix_date_typo)
     
-    # Always report corrections if any were made (bypass debug_print flag)
     if corrections_made:
-        print(f"🔧 Date corrections detected in column '{date_column}':")
+        print(f"🔧 Applied date corrections in column '{date_column}':")
         unique_corrections = list(set(corrections_made))
         for correction in unique_corrections:
             print(f"   {correction}")
         print(f"   Total corrections: {len(corrections_made)}")
-        
-        # Ask user for confirmation
-        response = input("\n❓ Do you want to apply these date corrections? (y/n): ").lower().strip()
-        if response in ['y', 'yes']:
-            print("✅ Applying date corrections...")
-            return df_work
-        else:
-            print("❌ Date corrections cancelled. Returning original data.")
-            return df
     
     return df_work
 
@@ -1086,8 +1065,8 @@ def featurize_all_sec_quarters():
             if os.path.isdir(item_path) and quarter_pattern.match(item):
                 quarter_directories.append(item_path)
     
-    # Sort directories to ensure consistent processing order
-    quarter_directories.sort()
+    # Most recent quarter first (e.g. 2026q1 before 2011q1)
+    quarter_directories.sort(reverse=True)
     
     print(f"Found {len(quarter_directories)} quarter directories:")
     for qtr_dir in quarter_directories:

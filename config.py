@@ -24,6 +24,7 @@ SAVE_DIR = os.path.join(DATA_DIR, 'featurized_since_2011')
 DATA_BASE_DIR = os.path.join(DATA_DIR, 'SEC_raw_since_2011')
 # NOTE: SEC raw data is only available since 2009, and 
 # become reliable after 2011
+SEC_CATCHUP_DIR = os.path.join(DATA_DIR, 'SEC_catchup_query')
 
 # stock data 
 STOCK_DIR = os.path.join(DATA_DIR, 'stock_Stooq_daily_US', 'derived_data')
@@ -46,6 +47,20 @@ QUARTER_FEATURIZED_PATTERN = os.path.join(SAVE_DIR, '{}_featurized.csv')  # Form
 # SEC data files
 COMPANY_TICKERS_EXCHANGE_FILE = os.path.join(DATA_DIR, 'company_tickers_exchange.json')
 SEC_TABLE_W_FILE_DATE_FILE = os.path.join(DATA_DIR, 'sec_table_w_file_date.csv')
+SEC_CATCHUP_INDEX_FILE = os.path.join(SEC_CATCHUP_DIR, 'catchup_index.csv')
+FEATURIZED_CATCHUP_FILE = os.path.join(SEC_CATCHUP_DIR, 'featurized_all_catchup.csv')
+
+# Fair-access policy: max 10 req/sec; identify yourself in User-Agent.
+SEC_USER_AGENT = (
+    'sec_report_predict research bot (julialiuca@gmail.com)'
+)
+SEC_REQUEST_INTERVAL_SEC = 0.12  # ~8 req/sec, under the 10/sec ceiling
+
+# Default event list for catch-up queries: CSV with at least (ticker, date).
+CATCHUP_EVENTS_FILE = (
+    '/Users/juanliu/Workspace/git_test/bargain_stocks/data/'
+    'stock_Stooq_daily_US/derived_data/current_bargains_2026-08-19_days21.csv'
+)
 
 # =============================================================================
 # FEATURIZATION PARAMETERS
@@ -90,7 +105,7 @@ def validate_config():
     """
     Validate that all required directories exist and create them if needed.
     """
-    directories_to_check = [DATA_DIR, SAVE_DIR, DATA_BASE_DIR, STOCK_DIR, MODEL_DIR]
+    directories_to_check = [DATA_DIR, SAVE_DIR, DATA_BASE_DIR, SEC_CATCHUP_DIR, STOCK_DIR, MODEL_DIR]
     
     for directory in directories_to_check:
         if not os.path.exists(directory):

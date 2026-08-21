@@ -36,6 +36,8 @@ The project processes SEC XBRL data from 2015-2025 to extract financial features
 
 - **`download_sec.py`** - Comprehensive SEC XBRL data downloader. Discovers and downloads multiple quarters/years (2015-2025) with retry logic, progress reporting, and automatic directory structure creation. Outputs to `data/SEC_raw_2015_to_2025/`.
 
+- **`catch_up_sec_reports.py`** - Fetches recent 10-K/10-Q filings via the live EDGAR API for event-driven tickers/dates, skipping accessions already present in the quarterly bulk dump. Writes per-accession `sub.txt`/`num.txt` under `data/SEC_catchup_query/` and can featurize them into `featurized_all_catchup.csv`.
+
 For deprecated/archived scripts, see `archive/README.md`.
 
 #### Data Exploration and Analysis
@@ -47,6 +49,8 @@ For deprecated/archived scripts, see `archive/README.md`.
 - **`validate_featurized_data.py`** - Debugging and validation tool for the featurization process. Ensures data quality and correctness of the feature engineering pipeline.
 
 - **`spotcheck.py`** - Spot-check tool to compare XBRL tags used by different companies in their 10-Q reports. Identifies common tags, unique tags, and finds closest matching tags for key financial metrics across companies. Useful for understanding tag consistency in SEC filings.
+
+- **`debug_catch_up.py`** - Compares catch-up API featurization against batch quarterly features for overlapping reports (`*_current` columns). Useful for validating that API-sourced filings match bulk-dump featurization.
 
 #### Stock Price Analysis
 
@@ -144,7 +148,7 @@ python validate_featurized_data.py
 
 NOTE: One can also run "python featurize.py" to catch up on SEC data. 
 
-### 3. Prepare and Process Stock Data
+### 3. Prepare and Process Stock Data from batch download
 
 **Prerequisites**: Download US daily stock data from [Stooq](https://stooq.com/db/h/) (requires authentication). Save the zip file as `d_us_txt.zip` in `data/explore_stooq/`.
 
@@ -168,7 +172,20 @@ Compare XBRL tags across companies:
 python spotcheck.py
 ```
 
-### 5. Build Machine Learning Models
+### 5. Catch up SEC report via API query
+
+Download filings that are newer than (or missing from) the quarterly bulk dump, then featurize them. Optionally compare catch-up features against a batch quarter file:
+
+```bash
+# Catch up from the configured events CSV (see CATCHUP_EVENTS_FILE in config.py)
+python catch_up_sec_reports.py
+
+# Compare catch-up vs batch features for default debug tickers
+python debug_catch_up.py \
+  --batch-file data/featurized_since_2011/2026q1_featurized.csv
+```
+
+### 6. Build Machine Learning Models
 
 Train baseline models:
 
